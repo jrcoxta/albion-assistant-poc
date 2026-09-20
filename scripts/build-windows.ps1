@@ -1,5 +1,6 @@
 ﻿param(
     [ValidateSet('Debug', 'Release')][string]$Configuration = 'Debug',
+    [string]$BuildDirectory,
     [switch]$Run
 )
 $ErrorActionPreference = 'Stop'
@@ -20,7 +21,7 @@ $cmake = Join-Path $vs 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\c
 $ninja = Join-Path $vs 'Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe'
 if (!(Test-Path $cmake)) { $cmake = (Get-Command cmake.exe -ErrorAction Stop).Source }
 if (!(Test-Path $ninja)) { $ninja = (Get-Command ninja.exe -ErrorAction Stop).Source }
-$build = Join-Path $root "build\windows\$Configuration"
+$build = if ($BuildDirectory) { [System.IO.Path]::GetFullPath($BuildDirectory) } else { Join-Path $root "build\windows\$Configuration" }
 & $cmake -S $root -B $build -G Ninja "-DCMAKE_BUILD_TYPE=$Configuration" "-DCMAKE_MAKE_PROGRAM=$ninja" '-DCMAKE_CXX_COMPILER=cl.exe' '-DBUILD_TESTING=ON'
 if ($LASTEXITCODE -ne 0) { throw 'Configuração CMake falhou.' }
 & $cmake --build $build

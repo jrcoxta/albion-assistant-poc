@@ -97,8 +97,15 @@ void settingsTests() {
           "arquivo ausente oferece preset de 3 stacks");
     check(!missing.buffs.valid() && !missing.highlight.valid(), "arquivo ausente exige calibracao");
     check(missing.validityMs == 750 && missing.iconSize == 48, "arquivo ausente preserva defaults de leitura");
+    check(missing.hudName == L"Minha HUD" && missing.monitorDevice.empty() &&
+          missing.monitorDpi == 0 && !missing.iconCalibrated,
+          "arquivo ausente usa metadados neutros e calibracao pendente");
 
     aa::Settings original;
+    original.hudName = L"Minha HUD ultrawide 漢字";
+    original.monitorDevice = L"\\\\.\\DISPLAY2";
+    original.monitorDpi = 144;
+    original.iconCalibrated = true;
     original.clientWidth = 1920; original.clientHeight = 1080;
     original.buffs = {11, 23, 401, 70}; original.highlight = {901, 750, 53, 58};
     original.iconSize = 64; original.validityMs = 900;
@@ -109,6 +116,9 @@ void settingsTests() {
     original.referencePath = L"C:\\Referências\\Espírito 漢字.png";
     aa::saveSettings(file.path.wstring(), original);
     const auto loaded = aa::loadSettings(file.path.wstring());
+    check(loaded.hudName == original.hudName && loaded.monitorDevice == original.monitorDevice &&
+          loaded.monitorDpi == original.monitorDpi && loaded.iconCalibrated,
+          "metadados do perfil e calibracao persistem");
     check(loaded.rule.name == original.rule.name && loaded.rule.profile == original.rule.profile,
           "nome e perfil preservam Unicode, aspas e espacos");
     check(loaded.referencePath == original.referencePath, "caminho de referencia preserva Unicode");
@@ -117,6 +127,11 @@ void settingsTests() {
           "calibracao e validade persistem");
     check(loaded.rule.enabled && loaded.rule.condition == aa::Condition::Absent && loaded.rule.stacks == 4 && loaded.rule.color == 0x12ABEF,
           "campos da regra persistem");
+    auto uncalibrated = original;
+    uncalibrated.iconCalibrated = false;
+    aa::saveSettings(file.path.wstring(), uncalibrated);
+    check(!aa::loadSettings(file.path.wstring()).iconCalibrated,
+          "flag explicita de icone pendente prevalece sobre regioes completas");
     original.rule.enabled = false;
     original.rule.condition = aa::Condition::Present;
     aa::saveSettings(file.path.wstring(), original);
@@ -158,6 +173,21 @@ void settingsTests() {
     WritePrivateProfileStringW(L"buffs", L"x", L"2147483647", file.path.c_str());
     WritePrivateProfileStringW(L"buffs", L"width", L"2147483647", file.path.c_str());
     check(!aa::loadSettings(file.path.wstring()).buffs.valid(), "soma extrema de coordenadas nao transborda");
+
+    aa::saveSettings(file.path.wstring(), original);
+    WritePrivateProfileStringW(L"hud", L"name", nullptr, file.path.c_str());
+    WritePrivateProfileStringW(L"hud", L"monitorDevice", nullptr, file.path.c_str());
+    WritePrivateProfileStringW(L"hud", L"monitorDpi", nullptr, file.path.c_str());
+    WritePrivateProfileStringW(L"hud", L"iconCalibrated", nullptr, file.path.c_str());
+    const auto legacy = aa::loadSettings(file.path.wstring());
+    check(legacy.hudName == L"Minha HUD" && legacy.monitorDevice.empty() && legacy.monitorDpi == 0,
+          "settings legado recebe metadados neutros sem perder compatibilidade");
+    check(legacy.iconCalibrated && sameRegion(legacy.buffs, original.buffs) &&
+          sameRegion(legacy.highlight, original.highlight) && legacy.iconSize == original.iconSize,
+          "settings legado com diametro e regioes completas preserva calibracao");
+    WritePrivateProfileStringW(L"capture", L"iconSize", L"invalido", file.path.c_str());
+    check(!aa::loadSettings(file.path.wstring()).iconCalibrated,
+          "diametro legado invalido nao e confundido com calibracao existente");
     bool saveFailed = false;
     try { aa::saveSettings((file.path / L"inexistente.ini").wstring(), original); }
     catch (const std::exception&) { saveFailed = true; }

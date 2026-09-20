@@ -67,7 +67,10 @@ Settings loadSettings(const std::wstring& path) {
     result.clientWidth = number(fullPath, L"capture", L"clientWidth", 0, 0, 32768, clientValid);
     result.clientHeight = number(fullPath, L"capture", L"clientHeight", 0, 0, 32768, clientValid);
     if ((result.clientWidth == 0) != (result.clientHeight == 0)) clientValid = false;
-    result.iconSize = number(fullPath, L"capture", L"iconSize", result.iconSize, 24, 256, valid);
+    bool iconSizeValid = true;
+    const bool legacyDiameterPresent = read(fullPath, L"capture", L"iconSize", iconSizeValid).has_value();
+    result.iconSize = number(fullPath, L"capture", L"iconSize", result.iconSize, 24, 256, iconSizeValid);
+    valid = valid && iconSizeValid;
     result.validityMs = number(fullPath, L"capture", L"validityMs", result.validityMs, 1, 60000, valid);
     result.buffs = region(fullPath, L"buffs", result.clientWidth, result.clientHeight, valid);
     result.highlight = region(fullPath, L"highlight", result.clientWidth, result.clientHeight, valid);
@@ -76,6 +79,14 @@ Settings loadSettings(const std::wstring& path) {
         result.buffs = result.highlight = {};
         valid = false;
     }
+    if (const auto value = read(fullPath, L"hud", L"name", valid)) result.hudName = *value;
+    if (const auto value = read(fullPath, L"hud", L"monitorDevice", valid)) result.monitorDevice = *value;
+    result.monitorDpi = static_cast<unsigned>(number(fullPath, L"hud", L"monitorDpi", 0, 0, 10000, valid));
+    if (read(fullPath, L"hud", L"iconCalibrated", valid))
+        result.iconCalibrated = number(fullPath, L"hud", L"iconCalibrated", 0, 0, 1, valid) != 0;
+    else
+        result.iconCalibrated = legacyDiameterPresent && iconSizeValid &&
+            result.buffs.valid() && result.highlight.valid();
     auto& rule = result.rule;
     if (const auto value = read(fullPath, L"rule", L"name", valid)) rule.name = *value;
     if (const auto value = read(fullPath, L"rule", L"profile", valid)) rule.profile = *value;
@@ -111,10 +122,10 @@ void saveSettings(const std::wstring& path, const Settings& settings) {
         const auto writeNumber = [&](const wchar_t* section, const wchar_t* key, auto value) {
             write(section, key, std::to_wstring(value));
         };
-        const auto writeText = [&](const wchar_t* key, const std::wstring& value) {
+        const auto writeText = [&](const wchar_t* section, const wchar_t* key, const std::wstring& value) {
             if (value.find_first_of(L"\r\n") != std::wstring::npos || value.find(L'\0') != std::wstring::npos || value.size() > 32000)
                 throw std::runtime_error("Texto de configuracao invalido.");
-            write(L"rule", key, L"\"" + value + L"\"");
+            write(section, key, L"\"" + value + L"\"");
         };
         writeNumber(L"capture", L"clientWidth", settings.clientWidth);
         writeNumber(L"capture", L"clientHeight", settings.clientHeight);
@@ -126,9 +137,13 @@ void saveSettings(const std::wstring& path, const Settings& settings) {
         };
         writeRegion(L"buffs", settings.buffs);
         writeRegion(L"highlight", settings.highlight);
-        writeText(L"name", settings.rule.name);
-        writeText(L"profile", settings.rule.profile);
-        writeText(L"referencePath", settings.referencePath);
+        writeText(L"hud", L"name", settings.hudName);
+        writeText(L"hud", L"monitorDevice", settings.monitorDevice);
+        writeNumber(L"hud", L"monitorDpi", settings.monitorDpi);
+        writeNumber(L"hud", L"iconCalibrated", settings.iconCalibrated ? 1 : 0);
+        writeText(L"rule", L"name", settings.rule.name);
+        writeText(L"rule", L"profile", settings.rule.profile);
+        writeText(L"rule", L"referencePath", settings.referencePath);
         writeNumber(L"rule", L"enabled", settings.rule.enabled ? 1 : 0);
         writeNumber(L"rule", L"condition", static_cast<int>(settings.rule.condition));
         writeNumber(L"rule", L"stacks", settings.rule.stacks);
