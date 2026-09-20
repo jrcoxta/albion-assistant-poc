@@ -1,0 +1,7 @@
+build/
+dist/
+.orchestration/
+.superpowers/
+settings.ini
+samples/
+*.user
