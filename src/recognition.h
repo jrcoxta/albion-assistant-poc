@@ -4,7 +4,7 @@
 namespace aa {
 class Recognizer {
 public:
-    explicit Recognizer(const std::filesystem::path& assetsDir);
+    explicit Recognizer(const std::filesystem::path& assetsDir = {});
     void setReference(const Image& image);
     Detection recognize(const Image& image, int iconSize) const;
 private:

@@ -1,4 +1,5 @@
 #include "recognition.h"
+#include "../resources/resource.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -41,12 +42,13 @@ float digitScore(const Image& roi,Region icon,const Image& reference) {
 }
 }
 Recognizer::Recognizer(const std::filesystem::path& assetsDir) {
-    try {
-        references_.push_back(loadImage(assetsDir/"assassin-none.png"));
-        digits_.push_back(loadImage(assetsDir/"assassin-2.png"));
-        digits_.push_back(loadImage(assetsDir/"assassin-3.png"));
-        references_.insert(references_.end(),digits_.begin(),digits_.end());
-    } catch(...) { references_.clear(); digits_.clear(); }
+    const auto load=[&](const wchar_t* name,int id){
+        return assetsDir.empty()?loadImageResource(id):loadImage(assetsDir/name);
+    };
+    references_.push_back(load(L"assassin-none.png",IDR_ASSASSIN_NONE));
+    digits_.push_back(load(L"assassin-2.png",IDR_ASSASSIN_2));
+    digits_.push_back(load(L"assassin-3.png",IDR_ASSASSIN_3));
+    references_.insert(references_.end(),digits_.begin(),digits_.end());
 }
 void Recognizer::setReference(const Image& image) {
     references_.clear();

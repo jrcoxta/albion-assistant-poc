@@ -1,55 +1,57 @@
-# Albion Assistant — POC com configuração guiada
+# Albion Assistant
 
-Aplicativo Windows em português para destacar uma região da HUD quando Espírito Assassino chega a **3 stacks**. A ação inicial destaca Golpe Fantasma. A leitura usa apenas a imagem visível do jogo; a POC não aperta habilidades nem joga pelo usuário.
+Aplicativo Windows x64 que destaca uma região da HUD quando Espírito Assassino chega a **3 stacks**. Captura a imagem visível do jogo e exibe uma borda sobre Golpe Fantasma; não envia teclas de combate.
 
-## Abrir e usar
+## Executar
 
-1. Abra o Albion em modo janela ou janela sem bordas, com a HUD visível.
-2. Feche outra instância do assistente e abra **Iniciar-v2.cmd** nesta pasta. A versão guiada está em `build/windows/GuidedRelease/AlbionAssistant.exe`. No pacote portátil v2, abra `Iniciar.cmd`.
-3. Em **1 · Conectar**, clique em **Conectar ao Albion**. Escolha uma HUD salva e clique em **Carregar**, ou crie uma **Nova HUD** com um nome como “Notebook” ou “Monitor 34”.
-4. Em **2 · Selecionar**, marque dois cantos opostos da região onde aparecem os buffs. Inclua espaço para o ícone mudar de posição quando outros buffs surgirem. A seleção acontece sobre uma imagem congelada, sem arrastar. Confira e clique em **Usar seleção**; Esc cancela.
-5. Com Espírito Assassino visível no jogo, use **Selecionar ícone** e clique nele. Confira a sugestão na prévia ampliada. Se necessário, escolha **Ajustar manual** ou pressione M e marque dois cantos; o recorte será quadrado. O tamanho é obtido da seleção, sem precisar digitar pixels. F2 move o painel de seleção se ele cobrir a informação desejada.
-6. Use **Selecionar destaque** para marcar dois cantos ao redor de Golpe Fantasma ou da informação que deseja destacar. Confirme a seleção.
-7. Em **3 · Criar ação**, confira a frase “Quando Espírito Assassino tiver 3 stacks, destacar a área selecionada de Golpe Fantasma”. Escolha a condição, a cor e mantenha **Regra ativa** marcada.
-8. Em **4 · Conferir e usar**, clique em **Testar destaque · 5 s**. A demonstração mostra uma borda e um aviso **TESTE**, sem depender de stacks e com a leitura real parada. Ao terminar, o painel retorna. Depois, clique em **Iniciar leitura**.
+Abra **`dist/AlbionAssistant.exe`**. É o único arquivo necessário para usar o programa: ícone, manifesto, informações de versão e referências de reconhecimento estão embutidos, com runtime C++ estático. Não precisa de launcher, pasta de imagens ou terminal. Abrir novamente traz a instância existente para frente.
 
-**F8** abre o painel; **F9** inicia ou para a leitura. Ambos encerram uma demonstração em andamento. Ao abrir o painel ou trocar de aplicativo, o destaque desaparece. Retornando ao jogo com a leitura ligada, a captura retoma. A configuração é salva ao confirmar uma seleção, testar, iniciar ou clicar em **Salvar HUD e ação**.
+1. Abra o Albion em janela ou janela sem bordas. Em **Conectar**, conecte ao jogo e escolha uma HUD salva ou **Nova HUD**.
+2. Em **Selecionar**, marque dois cantos da região dos buffs. Com Espírito Assassino visível, aponte o ícone e confira a prévia. **Ajustar manual** ou M permite dois cliques; o tamanho é obtido do recorte. Marque também a área de Golpe Fantasma. Confirme cada seleção; Esc cancela e F2 move o painel para liberar a área coberta.
+3. Em **Criar ação**, confira a condição, a cor e **Regra ativa**.
+4. Em **Conferir e usar**, **Testar destaque** mostra uma demonstração por cinco segundos, com aviso TESTE. Depois, **Iniciar leitura** usa a regra real.
 
-O painel exibe o estado atual e a última imagem capturada. A imagem pode continuar visível depois de parar; o texto acima informa se a leitura está válida. **Salvar amostra** grava essa região em `samples`, ao lado do executável.
+F8 abre o painel; F9 inicia ou para a leitura. O destaque apaga quando o jogo perde foco ou a informação fica incerta/expirada. O padrão de validade é 750 ms.
 
-## Regras e calibração
+## Dados e telas
 
-Esta POC edita **uma regra por HUD**: nome, conjunto de equipamento, condição (presente, ausente ou stacks iguais), valor, ativação e cor do destaque. As HUDs ficam em `hud-profiles`, ao lado do arquivo de configuração. A configuração ativa permanece em `settings.ini`; arquivos antigos são migrados preservando as regiões e a regra. Também é possível usar `--settings caminho-do-arquivo.ini`.
+As configurações ficam em **`%LOCALAPPDATA%\AlbionAssistant`**: `settings.ini`, `hud-profiles`, `samples` e diagnósticos quando ativados. Atualizar o EXE ou limpar o build não altera esses dados. O parâmetro opcional `--settings caminho.ini` usa uma configuração e pasta de dados explícitas.
 
-Use **Salvar HUD e ação** antes de carregar outra HUD ou criar uma nova se quiser conservar edições feitas nos campos. Carregar restaura a versão salva; Nova HUD inicia outra calibração e mantém a última ação e referência salvas. Um nome diferente salva outra HUD, sem apagar a anterior; nomes já utilizados por outra HUD são recusados.
+Salve uma HUD para cada resolução/layout, por exemplo “Notebook” e “Monitor 34”. Os perfis guardam posições, tamanho do ícone, resolução, monitor e DPI conhecidos. O programa sugere uma configuração compatível; você escolhe qual carregar. Calibrar outro ambiente preserva o perfil salvo anterior. A mudança de layout dentro do jogo exige nova seleção ou troca manual do perfil.
 
-O reconhecimento de stacks é específico para os números **2 e 3** das referências fornecidas. Um número que não pode ser lido permanece desconhecido; a ausência de número não é interpretada como 1. O relógio radial é tratado como variação visual e **não fornece uma contagem de segundos restantes**. Uma regra de stacks só acende quando o número é reconhecido. Para a condição de presença, a identidade do ícone é suficiente.
+Use **Salvar HUD e ação** antes de carregar outra HUD ou criar uma nova para conservar edições. Carregar restaura a versão salva. Nova HUD mantém a última ação e referência salvas e inicia outra calibração. Um nome já utilizado por outra HUD não pode sobrescrevê-la.
 
-Em **Avançado**, **Outra referência** aceita um recorte PNG/BMP de um único ícone. Isso substitui sua identidade visual, mas mantém os modelos de dígitos 2/3 do preset. Não constitui suporte validado para qualquer buff ou arma. **Usar preset** restaura Espírito Assassino. Após trocar a referência, selecione o ícone novamente. Diâmetro manual, validade da leitura e salvar amostra também ficam em Avançado.
+## Desenvolvimento
 
-Os perfis registram dimensões do jogo, monitor e DPI conhecidos. A tela de conexão sugere uma HUD compatível, mas você escolhe qual carregar. Uma mudança incompatível impede o início da leitura; ao confirmar uma seleção nesse novo ambiente, a calibração ganha outro nome e preserva a HUD salva anterior. A posição das áreas é relativa à janela do jogo, sem esticar coordenadas entre notebook e ultrawide.
-
-Mudanças na posição ou escala dos elementos **dentro do jogo** ainda exigem selecionar novamente ou carregar a HUD correspondente. As polegadas não definem as coordenadas: um monitor de 34 polegadas precisa de seu próprio perfil se a resolução ou o layout forem diferentes. O monitor físico de 34 polegadas ainda não foi validado.
-
-## Captura e limites
-
-- Captura DXGI do monitor que contém o jogo, copiando somente a região selecionada para processamento. O worker acompanha os frames disponíveis; não existe limitador fixo de 30/60 FPS nem fila de imagens atrasadas.
-- Overlay nativo transparente aos cliques, sem tomar foco, exibido somente com o jogo em primeiro plano e informação recente.
-- Leitura incerta, inválida ou expirada apaga o destaque. A validade padrão é 750 ms. Parar ou trocar de sessão invalida resultados anteriores.
-- Precisa de uma sessão Windows desbloqueada e do jogo visível. Não reconecta o personagem automaticamente. Captura de tela cheia exclusiva, monitor girado e janela distribuída entre monitores não são suportes validados; use janela sem bordas com a região inteira em um único monitor.
-- Nenhuma leitura de memória do jogo, injeção, interceptação de rede ou automação de combate.
-
-## Compilar e testar
-
-Requer Windows x64, Visual Studio Build Tools com C++/MSVC, SDK do Windows, CMake e Ninja. O script encontra as ferramentas instaladas pelo Visual Studio.
+Requisitos: Windows x64, Visual Studio Build Tools com C++/MSVC, SDK do Windows, CMake e Ninja. O script encontra as ferramentas do Visual Studio e funciona no Windows PowerShell 5.1 e PowerShell 7.
 
 ```powershell
-powershell -NoProfile -File .\scripts\build-windows.ps1 -Configuration Release
-powershell -NoProfile -File .\scripts\build-windows.ps1 -Configuration Debug
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-windows.ps1
 ```
 
-Use `-BuildDirectory build/windows/GuidedRelease` para gerar uma compilação separada da primeira POC. Cada compilação executa os testes de regras/configuração, reconhecimento, perfis, sugestão de ícones, seletor e layout. O runtime C++ é vinculado estaticamente. Os arquivos em `assets` precisam acompanhar o executável.
+Esse comando configura, compila, executa os testes e publica **`dist/AlbionAssistant.exe`** somente após aprovação dos testes. Execuções seguintes são incrementais. O progresso é resumido; o log completo fica em `build/logs/Release.log`.
 
-Para investigar a leitura, use `AlbionAssistant.exe --diagnostics`: gera `diagnostics.csv` com mudanças de estado e até 30 imagens da região por execução. Os tempos registrados são milissegundos desde o início da sessão Windows; o score é similaridade visual, não probabilidade. `--diagnostics --show-overlay-in-capture` inclui a borda nas capturas para inspeção visual; nesse modo, as áreas de leitura e destaque precisam estar separadas.
+- `-Configuration Debug`: compila e testa para desenvolvimento, sem substituir a entrega Release.
+- `-Clean`: recria apenas o cache da configuração escolhida, preservando os dados do usuário.
+- `-Run`: abre o aplicativo após sucesso.
 
-Os testes e as verificações da primeira POC estão em `docs/validacao.md`; os da interface guiada ficam em `docs/validacao-v2.md`. O projeto anterior em `C:/projetos/pessoais/albion-assistant` e o pacote da primeira POC foram preservados.
+Os presets `windows-release` e `windows-debug` em `CMakePresets.json` também podem ser usados por uma IDE ou Developer PowerShell. A versão do produto é definida uma vez em `CMakeLists.txt`; o histórico de mudanças fica no Git.
+
+| Pasta | Responsabilidade |
+|---|---|
+| `src` | Interface, captura, reconhecimento, regras e persistência |
+| `resources` | Ícone, manifesto e recursos Windows |
+| `assets` | Fontes das imagens embutidas e negativos de teste |
+| `tests` | Testes e capturas reais de referência |
+| `scripts` | Build e publicação |
+| `docs` | Evidências e limites da validação |
+| `build` | Cache e testes gerados; fora do Git |
+| `dist` | Um único executável de entrega; fora do Git |
+
+## Limites da POC
+
+Há uma regra por HUD, com condições de presença, ausência ou stacks **2/3**. Contador ilegível permanece desconhecido; não inferimos 1. O relógio radial é uma variação visual, sem cálculo de segundos restantes. **Avançado → Outra referência** troca a identidade do ícone, mantendo os dígitos desse preset; isso não é reconhecimento universal de buffs.
+
+A captura usa DXGI e frames disponíveis, sem limitador fixo de 30/60 FPS nem fila crescente. Precisa de sessão Windows desbloqueada e jogo visível. Tela cheia exclusiva, HDR, monitor girado e janela distribuída entre monitores ainda não foram validados. Não há leitura de memória do jogo, injeção, interceptação de rede nem login automático.
+
+`--diagnostics` grava mudanças de estado e amostras na pasta de dados. `--diagnostics --show-overlay-in-capture` inclui a borda na captura para inspeção; exige áreas de leitura e destaque separadas. As evidências e pendências estão em [docs/validacao.md](docs/validacao.md).

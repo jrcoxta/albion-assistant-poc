@@ -29,11 +29,12 @@ int main() {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         TestApp app;
         app.instance=GetModuleHandleW(nullptr);
-        app.directory=std::filesystem::temp_directory_path()/
+        const auto dataDirectory=std::filesystem::temp_directory_path()/
             (L"albion-app-flow-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64()));
-        std::filesystem::create_directories(app.directory);
-        app.settingsPath=app.directory/L"settings.ini";
-        app.profilesDir=app.directory/L"hud-profiles";
+        app.configureStorage(dataDirectory/L"personalizado.ini");
+        require(app.directory==dataDirectory&&app.profilesDir==dataDirectory/L"hud-profiles"&&
+                std::filesystem::is_directory(dataDirectory),
+            "arquivo de configuração explícito não isolou todos os dados na pasta escolhida");
         app.settings.hudName=L"Notebook";
         app.settings.referencePath=L"referencia-de-teste.png";
         app.settings.rule.color=RGB(40,255,120);

@@ -9,5 +9,6 @@ struct Image {
     bool valid() const { return width > 0 && height > 0 && bgra.size() == static_cast<std::size_t>(width) * height * 4; }
 };
 Image loadImage(const std::filesystem::path& path);
+Image loadImageResource(int resourceId);
 void saveImage(const Image& image, const std::filesystem::path& path);
 }

@@ -2,6 +2,7 @@
 #include <windowsx.h>
 #include <commctrl.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <commdlg.h>
 #include <objbase.h>
 #include <algorithm>
@@ -22,9 +23,12 @@
 #include "calibration.h"
 #include "selection.h"
 #include "panel_layout.h"
+#include "../resources/resource.h"
 
 namespace {
 constexpr UINT ResultMessage=WM_APP+1;
+constexpr UINT ActivateMessage=WM_APP+2;
+constexpr wchar_t AppWindowClass[]=L"AlbionAssistant";
 enum Id { Connect=100, Buffs, Highlight, LoadReference, Save, Start, Stop, Sample,
     Profile, Name, ConditionBox, Stacks, IconSize, Enabled, Color, Validity,
     HudList,HudName,LoadHud,NewHud,SelectIcon,TestHighlight,Advanced,Back,Next,ResetReference,Tab0=200 };
@@ -39,6 +43,12 @@ std::wstring text(HWND w) { int n=GetWindowTextLengthW(w); std::wstring s(n+1,L'
 RECT rect(aa::Region r) { return {r.x,r.y,r.x+r.width,r.y+r.height}; }
 bool fits(aa::Region r,int w,int h) { return r.valid() && r.x<w && r.y<h && r.width<=w-r.x && r.height<=h-r.y; }
 struct ComScope { HRESULT hr=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED); ~ComScope(){if(SUCCEEDED(hr))CoUninitialize();} };
+std::filesystem::path defaultSettingsPath(){
+    wchar_t folder[MAX_PATH]{};
+    if(FAILED(SHGetFolderPathW(nullptr,CSIDL_LOCAL_APPDATA,nullptr,SHGFP_TYPE_CURRENT,folder)))
+        throw std::runtime_error("Não foi possível localizar a pasta de dados do usuário.");
+    return std::filesystem::path(folder)/L"AlbionAssistant"/L"settings.ini";
+}
 struct Screen { int width=0,height=0;unsigned dpi=0;std::wstring device;POINT origin{}; };
 Screen screenOf(HWND target){
     Screen s;RECT r{};MONITORINFOEXW info{};info.cbSize=sizeof(info);
@@ -63,6 +73,11 @@ struct App {
     bool diagnostics=false,showOverlayInCapture=false; std::ofstream trace; std::string lastTrace; unsigned sampleCount=0;
     struct Control {HWND hwnd;int panel;bool extra;};
     double dpi=1; std::vector<Control> controls;
+    void configureStorage(const std::filesystem::path& settingsFile={}){
+        settingsPath=std::filesystem::absolute(settingsFile.empty()?defaultSettingsPath():settingsFile);
+        directory=settingsPath.parent_path();profilesDir=directory/L"hud-profiles";
+        std::filesystem::create_directories(directory);
+    }
     int px(int v)const{return static_cast<int>(v*dpi);}
     HWND control(const wchar_t* cls,const wchar_t* label,DWORD style,int x,int y,int w,int h,int id=0) {
         HWND c=CreateWindowExW(0,cls,label,WS_CHILD|WS_VISIBLE|style,px(x),px(y),px(w),px(h),window,reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),instance,nullptr);
@@ -328,7 +343,7 @@ struct App {
         InflateRect(&highlightArea,6,6);
         if(showOverlayInCapture && IntersectRect(&overlap,&buffArea,&highlightArea))
             throw std::runtime_error("No diagnóstico visual, selecione o destaque fora da região dos buffs.");
-        recognizer=std::make_unique<aa::Recognizer>(directory/L"assets");
+        recognizer=std::make_unique<aa::Recognizer>();
         if(!settings.referencePath.empty())recognizer->setReference(aa::loadImage(settings.referencePath));
         persist();error=L"Aguardando a primeira captura.";running=true;auto runSource=++source;int size=settings.iconSize;
         showPage(3);
@@ -403,7 +418,7 @@ void App::choose(int kind){
         {std::unique_lock lock(sampleMutex);arrived.wait_for(lock,std::chrono::milliseconds(3000),[&]{return snapshot.valid();});}
         single.stop();
         if(!snapshot.valid())throw std::runtime_error("Não consegui congelar a imagem do jogo. Volte ao Albion e tente novamente. "+failure);
-        aa::Recognizer reference(directory/L"assets");
+        aa::Recognizer reference;
         if(!settings.referencePath.empty())reference.setReference(aa::loadImage(settings.referencePath));
         auto mode=kind==1?aa::SelectionKind::Buffs:kind==2?aa::SelectionKind::Highlight:aa::SelectionKind::Icon;
         auto chosen=aa::selectRegion(window,target,snapshot,before.origin,mode,&reference);
@@ -460,6 +475,9 @@ LRESULT CALLBACK appProc(HWND w,UINT m,WPARAM wp,LPARAM lp){
     }}return 0;
     case WM_HOTKEY:if(a->selecting)return 0;if(wp==1){if(a->previewUntil)a->stop();ShowWindow(w,SW_RESTORE);SetForegroundWindow(w);}else if(wp==2){if(a->running||a->previewUntil)a->stop();else a->start();}return 0;
     case ResultMessage:a->consume();return 0;
+    case ActivateMessage:
+        if(!a->selecting){if(a->previewUntil)a->stop();ShowWindow(w,SW_RESTORE);SetForegroundWindow(w);}
+        return 0;
     case WM_TIMER:if(a->selecting)return 0;a->updateHighlight();a->refreshStatus();if(a->page==3){RECT r{a->px(24),a->px(432),a->px(832),a->px(530)};InvalidateRect(w,&r,FALSE);}return 0;
     case WM_PAINT:a->paint();return 0;
     case WM_DPICHANGED:{a->stop();auto*r=reinterpret_cast<RECT*>(lp);SetWindowPos(w,nullptr,r->left,r->top,r->right-r->left,r->bottom-r->top,SWP_NOZORDER);a->rebuildUIWithDraft();return 0;}
@@ -470,12 +488,27 @@ LRESULT CALLBACK appProc(HWND w,UINT m,WPARAM wp,LPARAM lp){
 }
 }
 int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show){
-    try{SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);ComScope com;App app;app.instance=instance;
-        wchar_t exe[32768]{};GetModuleFileNameW(nullptr,exe,32768);app.directory=std::filesystem::path(exe).parent_path();app.settingsPath=app.directory/L"settings.ini";
-        int argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);for(int i=1;i<argc;i++){if(std::wstring(argv[i])==L"--settings"&&i+1<argc)app.settingsPath=argv[++i];else if(std::wstring(argv[i])==L"--diagnostics")app.diagnostics=true;else if(std::wstring(argv[i])==L"--show-overlay-in-capture")app.showOverlayInCapture=true;}LocalFree(argv);
+    try{
+        const auto mutex=CreateMutexW(nullptr,FALSE,L"Local\\AlbionAssistant");
+        const bool alreadyOpen=GetLastError()==ERROR_ALREADY_EXISTS;
+        if(!mutex)throw std::runtime_error("Não foi possível iniciar o aplicativo.");
+        const std::unique_ptr<void,decltype(&CloseHandle)> instanceLock(mutex,&CloseHandle);
+        if(alreadyOpen){
+            for(int attempt=0;attempt<20;++attempt){
+                if(auto existing=FindWindowW(AppWindowClass,nullptr)){
+                    DWORD process=0;GetWindowThreadProcessId(existing,&process);AllowSetForegroundWindow(process);
+                    PostMessageW(existing,ActivateMessage,0,0);break;
+                }
+                Sleep(100);
+            }
+            return 0;
+        }
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);ComScope com;App app;app.instance=instance;
+        std::filesystem::path settingsFile;
+        int argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);for(int i=1;i<argc;i++){if(std::wstring(argv[i])==L"--settings"&&i+1<argc)settingsFile=argv[++i];else if(std::wstring(argv[i])==L"--diagnostics")app.diagnostics=true;else if(std::wstring(argv[i])==L"--show-overlay-in-capture")app.showOverlayInCapture=true;}LocalFree(argv);
         app.showOverlayInCapture=app.showOverlayInCapture&&app.diagnostics;
-        app.settingsPath=std::filesystem::absolute(app.settingsPath);
-        app.profilesDir=app.settingsPath.parent_path()/L"hud-profiles";app.settings=aa::loadSettings(app.settingsPath.wstring());app.overlay.initialize(instance);app.overlay.setCaptureVisible(app.showOverlayInCapture);
+        app.configureStorage(settingsFile);
+        app.settings=aa::loadSettings(app.settingsPath.wstring());app.overlay.initialize(instance);app.overlay.setCaptureVisible(app.showOverlayInCapture);
         app.profiles=aa::listHudProfiles(app.profilesDir);
         if(std::filesystem::exists(app.settingsPath)){
             const bool namedActive=aa::hasExplicitHudName(app.settingsPath);
@@ -486,9 +519,9 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show){
                 aa::saveHudProfile(app.profilesDir,app.settings,L"");aa::saveSettings(app.settingsPath.wstring(),app.settings);app.loadedHudName=app.settings.hudName;
             }
         }
-        WNDCLASSW wc{};wc.hInstance=instance;wc.lpfnWndProc=appProc;wc.lpszClassName=L"AlbionAssistantPoc";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_BTNFACE+1);RegisterClassW(&wc);
+        WNDCLASSW wc{};wc.hInstance=instance;wc.lpfnWndProc=appProc;wc.lpszClassName=AppWindowClass;wc.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(IDI_APP));wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_BTNFACE+1);RegisterClassW(&wc);
         auto dpi=GetDpiForSystem();RECT bounds{0,0,MulDiv(860,dpi,96),MulDiv(700,dpi,96)};AdjustWindowRectExForDpi(&bounds,WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,FALSE,0,dpi);
-        if(!CreateWindowExW(0,L"AlbionAssistantPoc",L"Albion Assistant — Configuração guiada",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,CW_USEDEFAULT,CW_USEDEFAULT,bounds.right-bounds.left,bounds.bottom-bounds.top,nullptr,nullptr,instance,&app))throw std::runtime_error("Falha ao abrir aplicativo.");
+        if(!CreateWindowExW(0,AppWindowClass,L"Albion Assistant",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,CW_USEDEFAULT,CW_USEDEFAULT,bounds.right-bounds.left,bounds.bottom-bounds.top,nullptr,nullptr,instance,&app))throw std::runtime_error("Falha ao abrir aplicativo.");
         ShowWindow(app.window,show);MSG msg{};while(GetMessageW(&msg,nullptr,0,0)>0){if(!IsDialogMessageW(app.window,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}}
         if(app.font)DeleteObject(app.font);if(app.titleFont)DeleteObject(app.titleFont);return 0;
     }catch(const std::exception&e){MessageBoxW(nullptr,widen(e.what()).c_str(),L"Albion Assistant — erro",MB_OK|MB_ICONERROR);return 1;}

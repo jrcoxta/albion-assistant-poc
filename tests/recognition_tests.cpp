@@ -1,4 +1,5 @@
 #include "recognition.h"
+#include "../resources/resource.h"
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -36,6 +37,16 @@ int main(int argc,char** argv) {
         const auto two=aa::loadImage(assets/"assassin-2.png");
         const auto none=aa::loadImage(assets/"assassin-none.png");
         check(three.valid() && two.valid() && none.valid(),"Referencias reais decodificadas");
+        aa::Recognizer embedded;
+        const auto sameImage=[](const aa::Image& a,const aa::Image& b){
+            return a.width==b.width&&a.height==b.height&&a.bgra==b.bgra;
+        };
+        check(sameImage(aa::loadImageResource(IDR_ASSASSIN_NONE),none),"Referencia sem numero embutida difere do arquivo original");
+        check(sameImage(aa::loadImageResource(IDR_ASSASSIN_2),two),"Referencia 2 embutida difere do arquivo original");
+        check(sameImage(aa::loadImageResource(IDR_ASSASSIN_3),three),"Referencia 3 embutida difere do arquivo original");
+        bool rejectedResource=false;
+        try { aa::loadImageResource(65535); } catch(const std::runtime_error&) { rejectedResource=true; }
+        check(rejectedResource,"Recurso embutido ausente deve informar erro");
         const auto result=recognizer.recognize(three,64);
         check(result.presence==aa::Presence::Present,"Buff real com 3 deve estar presente");
         check(result.stacks==3u,"Numero real 3 deve ser lido separadamente");
@@ -75,12 +86,14 @@ int main(int argc,char** argv) {
         auto duplicate=place(three,180,70,0,0);
         for(int y=0;y<64;++y) std::copy_n(two.bgra.data()+y*64*4,64*4,duplicate.bgra.data()+(y*180+110)*4);
         check(recognizer.recognize(duplicate,64).presence==aa::Presence::Unknown,"Dois candidatos nao selecionam stack arbitrario");
-        aa::Recognizer missing(assets/"nao-existe");
-        check(missing.recognize(three,64).presence==aa::Presence::Unknown,"Referencia ausente nunca confirma ausencia do buff");
-        missing.setReference(none);
-        check(missing.recognize(three,64).presence==aa::Presence::Present,"Referencia cadastrada deve substituir a identidade");
-        missing.setReference({});
-        check(missing.recognize(three,64).presence==aa::Presence::Unknown,"Referencia invalida apaga identidade anterior");
+        bool rejectedModel=false;
+        try { aa::Recognizer missing(assets/"nao-existe"); } catch(const std::runtime_error&) { rejectedModel=true; }
+        check(rejectedModel,"Modelo externo ausente deve informar erro sem ocultar a falha");
+        aa::Recognizer custom;
+        custom.setReference(none);
+        check(custom.recognize(three,64).presence==aa::Presence::Present,"Referencia cadastrada deve substituir a identidade");
+        custom.setReference({});
+        check(custom.recognize(three,64).presence==aa::Presence::Unknown,"Referencia invalida apaga identidade anterior");
         struct RealCase { const char* file; aa::Presence presence; std::optional<unsigned> stacks; };
         const RealCase liveCases[]={
             {"12025625-stacks-unknown.png",aa::Presence::Absent,{}},
@@ -109,7 +122,11 @@ int main(int argc,char** argv) {
         const auto live=assets.parent_path()/"tests"/"fixtures"/"recognition-live";
         int failures=0;
         for(const auto& sample:liveCases) {
-            const auto actual=recognizer.recognize(aa::loadImage(live/sample.file),64);
+            const auto screenshot=aa::loadImage(live/sample.file);
+            const auto actual=recognizer.recognize(screenshot,64);
+            const auto packaged=embedded.recognize(screenshot,64);
+            check(packaged.presence==actual.presence&&packaged.stacks==actual.stacks&&packaged.confidence==actual.confidence,
+                "Modelo embutido mudou a leitura de uma captura real");
             if(actual.presence!=sample.presence || actual.stacks!=sample.stacks) {
                 ++failures;
                 std::cerr<<"Amostra "<<sample.file<<": esperado "<<sample.stacks.value_or(0)<<", obtido "<<actual.stacks.value_or(0)<<"\n";
@@ -117,6 +134,9 @@ int main(int argc,char** argv) {
         }
         std::cout<<"Amostras reais: "<<(std::size(liveCases)-failures)<<"/"<<std::size(liveCases)<<" corretas\n";
         check(failures==0,"ROIs reais distinguem 2, 3, sem numero e ausente sem oscilar");
+        for(const auto* name:{"other-food.png","other-buff.png"})
+            check(embedded.recognize(aa::loadImage(assets/name),64).presence==aa::Presence::Absent,
+                "Modelo embutido confundiu outro buff com Espirito Assassino");
         check(recognizer.recognize(aa::loadImage(live/"12040312-stacks-3.png"),64).stacks==3u,"Estado inicial com 3 real");
         check(!recognizer.recognize(aa::loadImage(live/"12036046-stacks-unknown.png"),64).stacks,"Numero desaparecido nao retem 3 anterior");
         for(const auto* extension:{".png",".bmp"}) {

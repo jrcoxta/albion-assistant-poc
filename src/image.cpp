@@ -16,11 +16,7 @@ ComPtr<IWICImagingFactory> factory() {
     checked(CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&out)));
     return out;
 }
-}
-Image loadImage(const std::filesystem::path& path) {
-    const auto wic=factory();
-    ComPtr<IWICBitmapDecoder> decoder;
-    checked(wic->CreateDecoderFromFilename(path.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&decoder));
+Image decode(IWICImagingFactory* wic,IWICBitmapDecoder* decoder) {
     ComPtr<IWICBitmapFrameDecode> frame;
     checked(decoder->GetFrame(0,&frame));
     UINT width=0,height=0;
@@ -32,6 +28,30 @@ Image loadImage(const std::filesystem::path& path) {
     Image out{static_cast<int>(width),static_cast<int>(height),std::vector<std::uint8_t>(std::size_t(width)*height*4)};
     checked(converter->CopyPixels(nullptr,width*4,static_cast<UINT>(out.bgra.size()),out.bgra.data()));
     return out;
+}
+}
+Image loadImage(const std::filesystem::path& path) {
+    const auto wic=factory();
+    ComPtr<IWICBitmapDecoder> decoder;
+    checked(wic->CreateDecoderFromFilename(path.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&decoder));
+    return decode(wic.Get(),decoder.Get());
+}
+Image loadImageResource(int resourceId) {
+    if(resourceId<=0 || resourceId>65535) throw std::invalid_argument("Identificador de imagem invalido");
+    const auto module=GetModuleHandleW(nullptr);
+    const auto resource=FindResourceW(module,MAKEINTRESOURCEW(resourceId),RT_RCDATA);
+    if(!resource) throw std::runtime_error("Referencia de imagem ausente no aplicativo");
+    const auto size=SizeofResource(module,resource);
+    const auto handle=LoadResource(module,resource);
+    auto* bytes=handle?static_cast<BYTE*>(LockResource(handle)):nullptr;
+    if(!bytes || !size) throw std::runtime_error("Referencia de imagem invalida no aplicativo");
+    const auto wic=factory();
+    ComPtr<IWICStream> stream;
+    checked(wic->CreateStream(&stream));
+    checked(stream->InitializeFromMemory(bytes,size));
+    ComPtr<IWICBitmapDecoder> decoder;
+    checked(wic->CreateDecoderFromStream(stream.Get(),nullptr,WICDecodeMetadataCacheOnLoad,&decoder));
+    return decode(wic.Get(),decoder.Get());
 }
 void saveImage(const Image& image, const std::filesystem::path& path) {
     if(!image.valid() || image.bgra.size()>std::numeric_limits<UINT>::max()) throw std::runtime_error("Imagem invalida");
