@@ -169,6 +169,28 @@ bool Recognizer::setStackReference(unsigned value,const Image& image) {
     stackReferences_.push_back({value,image});
     return true;
 }
+Detection Recognizer::recognizeNearSize(const Image& image,int iconSize,RegionShape searchShape) const {
+    auto result=recognize(image,iconSize,searchShape);
+    // Não reinterpretar uma captura inválida, uniforme ou ambígua. A tolerância
+    // corrige somente o tamanho manual, sem diminuir os limiares de identidade.
+    if(result.presence==Presence::Present ||
+       (result.detail!="Buff nao localizado" && result.detail!="Identidade incerta"))return result;
+    std::optional<Detection> found;
+    for(int offset:{-2,-1,1,2}) {
+        const int size=iconSize+offset;
+        if(size<24||size>256||size>image.width||size>image.height)continue;
+        auto candidate=recognize(image,size,searchShape);
+        if(candidate.detail=="Mais de um candidato ao buff")return candidate;
+        if(candidate.presence==Presence::Present) {
+            if(found&&(std::abs((candidate.icon.x+candidate.icon.width/2.0)-(found->icon.x+found->icon.width/2.0))>iconSize/2.0 ||
+                       std::abs((candidate.icon.y+candidate.icon.height/2.0)-(found->icon.y+found->icon.height/2.0))>iconSize/2.0)) {
+                result={};result.detail="Mais de um candidato ao buff";return result;
+            }
+            if(!found||candidate.confidence>found->confidence)found=std::move(candidate);
+        }else if(candidate.confidence>result.confidence)result=std::move(candidate);
+    }
+    return found?*found:result;
+}
 Detection Recognizer::recognize(const Image& image,int iconSize,RegionShape searchShape) const {
     Detection out;
     const Region search{0,0,image.width,image.height,searchShape};

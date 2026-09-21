@@ -133,6 +133,29 @@ int wmain(int argc,wchar_t** argv){
         const aa::Image captured{250,60,std::vector<std::uint8_t>(250*60*4,37)};
         app.running=true;app.latestSource=app.source;app.latestImage=captured;app.pending=true;app.consume();app.stop();
         require(app.capturePreview.bgra==captured.bgra,"Monitor não recebeu o frame capturado");
+        // Abrir o painel pausa a captura, mas deve permitir consultar a leitura
+        // anterior sem que ela mantenha um destaque aceso.
+        const auto previousPlan=app.plan;
+        app.plan=aa::makeMonitorPlan(app.workspace);app.running=true;++app.source;
+        app.latestSource=app.source;
+        app.latest={{{aa::Presence::Present,3u,1.0f,{},{}},static_cast<std::int64_t>(GetTickCount64()),app.source}};
+        app.latestImage=captured;app.pending=true;app.consume();
+        app.latest={{{},0,app.source}};app.latestError=L"Janela alvo não está em primeiro plano.";app.pending=true;app.consume();
+        require(shows(app,L"Última leitura")&&shows(app,L"stacks 3")&&!app.lit.front(),
+                "Abrir painel apagou o diagnóstico anterior ou manteve destaque sem captura atual");
+        screenshot(app,pictures,L"ui-monitor-ultima-leitura.png");
+        const auto readingNow=static_cast<std::int64_t>(GetTickCount64());
+        app.current=app.lastReadings;app.current.front().capturedMs=readingNow;app.evaluateReadings(readingNow,true);
+        require(app.lit.front(),"controle positivo não acendeu com leitura recente e alvo em foco");
+        app.current={{{},0,app.source}};app.evaluateReadings(readingNow,true);
+        require(!app.lit.front(),"histórico acendeu destaque sem captura atual com jogo em foco");
+        app.current=app.lastReadings;app.current.front().capturedMs=readingNow-app.workspace.validityMs;
+        app.evaluateReadings(readingNow,true);require(!app.lit.front(),"histórico acendeu destaque com captura expirada");
+        ++app.source;app.refreshStatus();
+        require(!shows(app,L"Última leitura"),"nova fonte mostrou diagnóstico da fonte anterior");
+        app.stop();app.refreshStatus();
+        require(!shows(app,L"Última leitura"),"Parar conservou diagnóstico de uma sessão anterior");
+        app.plan=previousPlan;
         tab(app,2);
         require(app.capturePreview.width==captured.width&&app.capturePreview.height==captured.height&&app.capturePreview.bgra==captured.bgra,
             "abrir Status substituiu a captura pela referência");

@@ -131,7 +131,7 @@ void App::stop(){
     if(badge)ShowWindow(badge,SW_HIDE);
     for(auto& o:overlays)o->update(target,{},false);overlays.clear();
     if(testOverlay)testOverlay->update(target,{},false);
-    recognizers.clear();current.clear();lit.assign(plan.actions.size(),false);
+    recognizers.clear();current.clear();lastReadings.clear();lit.assign(plan.actions.size(),false);
     {std::lock_guard lock(mutex);latest.clear();latestSource=0;latestImage={};latestError.clear();pending=false;}
 }
 void App::start(){
@@ -167,7 +167,7 @@ void App::start(){
                 batch[i].source=runSource;batch[i].capturedMs=frame.capturedMs;
                 if(!frame.available)continue;
                 try{auto roi=plan.readers[i].area.region;roi.x-=plan.captureArea.x;roi.y-=plan.captureArea.y;
-                    batch[i].detection=recognizers[i]->recognize(aa::cropImage(frame.image,roi),plan.readers[i].area.iconSize,roi.shape);
+                    batch[i].detection=recognizers[i]->recognizeNearSize(aa::cropImage(frame.image,roi),plan.readers[i].area.iconSize,roi.shape);
                 }catch(const std::exception& e){failure=widen(e.what());}
             }
             {std::lock_guard lock(mutex);latest=std::move(batch);latestSource=runSource;latestImage=std::move(frame.image);latestError=std::move(failure);}
@@ -177,7 +177,17 @@ void App::start(){
 }
 void App::consume(){
     {std::lock_guard lock(mutex);pending=false;if(!running||latestSource!=source)return;current=latest;if(latestImage.valid())capturePreview=std::move(latestImage);error=latestError;}
+    // Histórico somente informativo: evaluateMonitor continua recebendo current.
+    if(!current.empty()&&std::all_of(current.begin(),current.end(),[this](const auto& observation){
+        return observation.source==source&&observation.capturedMs>0;
+    }))lastReadings=current;
     updateHighlight();refreshStatus();if(page==0){RECT area{px(24),px(486),px(832),px(602)};InvalidateRect(window,&area,FALSE);}
+}
+std::vector<std::optional<float>> App::evaluateReadings(std::int64_t now,bool targetReady){
+    std::vector<std::optional<float>> remaining(plan.actions.size());
+    if(running&&targetReady)lit=aa::evaluateMonitor(plan,current,now,workspace.validityMs,source,&remaining);
+    else lit.assign(plan.actions.size(),false);
+    return remaining;
 }
 void App::updateHighlight(){
     const auto now=static_cast<std::int64_t>(GetTickCount64());const bool geometry=geometryMatches();
@@ -191,9 +201,7 @@ void App::updateHighlight(){
         if(!active){previewUntil=0;error=L"Teste da ação encerrado. Ele não inicia a leitura das regras.";ShowWindow(window,SW_RESTORE);SetForegroundWindow(window);}
         return;
     }
-    std::vector<std::optional<float>> remaining(plan.actions.size());
-    if(running&&geometry&&GetForegroundWindow()==target)lit=aa::evaluateMonitor(plan,current,now,workspace.validityMs,source,&remaining);
-    else lit.assign(plan.actions.size(),false);
+    const auto remaining=evaluateReadings(now,geometry&&GetForegroundWindow()==target);
     for(std::size_t i=0;i<overlays.size();++i) {
         overlays[i]->setRemaining(remaining[i]);overlays[i]->update(target,rect(plan.actions[i].target),lit[i]);
     }

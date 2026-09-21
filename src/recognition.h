@@ -12,6 +12,8 @@ public:
     // Recortes de 24..256 px com contador branco, rótulos 1..99; inválidos não alteram amostras.
     bool setStackReference(unsigned value, const Image& image);
     Detection recognize(const Image& image, int iconSize, RegionShape searchShape=RegionShape::Rectangle) const;
+    // Tolerância local para a medição manual; a calibração mantém a busca exata.
+    Detection recognizeNearSize(const Image& image, int iconSize, RegionShape searchShape=RegionShape::Rectangle) const;
 private:
     struct StackReference { unsigned value; Image image; };
     std::vector<Image> references_;

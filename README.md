@@ -14,11 +14,15 @@ Abra **`dist/AlbionAssistant.exe`**. É o único arquivo necessário para usar o
 
 F8 abre o painel; F9 inicia ou para a leitura. O destaque apaga quando o jogo perde foco ou a informação fica incerta/expirada. O padrão de validade é 750 ms.
 
+Ao voltar ao painel, o Monitor conserva a última leitura para consulta, com sua idade e o aviso de que ela não aciona destaque. Parar ou trocar a sessão limpa esse histórico. A busca tolera uma diferença de até dois pixels na medição manual quando o tamanho informado não confirma a identidade; não muda a medida salva nem reduz os critérios de reconhecimento.
+
 Para acrescentar um aro regressivo, marque **Acompanhar relógio do status (experimental)** na regra. Ele segue a sombra radial observada no buff, junto à aura da habilidade. Não começa uma contagem ao atingir 3 stacks nem presume a duração do status. Uma renovação observada pode voltar a preencher o aro. O teste de 5 segundos é identificado como **SIMULAÇÃO DO ARO**.
 
 O exemplo de Espírito Assassino inclui uma referência própria do relógio. Para outro status, renove o efeito antes de clicar em **Status → Capturar relógio** e selecione o ícone inteiro, iluminado, sem a sombra do relógio. Essa captura preserva a referência de identidade e as amostras de stacks. Trocar a identidade do status invalida a referência temporal anterior. Uma referência ausente ou inválida deixa somente o aro indisponível, com aviso no Monitor; a regra e a aura continuam funcionando.
 
 O aro pode sumir quando não há fronteira legível, inclusive no começo/fim do efeito ou quando o contador a encobre. Isso significa tempo desconhecido, não confirmação de que o buff acabou. O trecho inicial foi verificado em algumas capturas reais; a volta completa, renovação contínua e outros status ainda precisam de validação no jogo. Testes sintéticos também exercitam ícones de 40, 48, 64 e 96 pixels; ícones muito pequenos podem não fornecer evidência suficiente.
+
+Na HUD ultrawide capturada em 21/09/2026, a referência embutida do relógio não corresponde suficientemente aos pixels do ícone: o aro permanece indisponível mesmo com os 3 stacks reconhecidos. O destaque da regra continua independente. Esse caso ainda exige validar uma referência temporal local limpa; não há contagem aproximada usada como substituta.
 
 ## Dados e telas
 

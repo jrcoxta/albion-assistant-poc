@@ -54,7 +54,7 @@ struct App {
     std::vector<std::unique_ptr<aa::Recognizer>> recognizers;
     std::vector<std::unique_ptr<Overlay>> overlays;
     std::unique_ptr<Overlay> testOverlay;
-    std::vector<aa::Observation> current, latest;
+    std::vector<aa::Observation> current, latest, lastReadings;
     std::vector<bool> lit;
     std::mutex mutex;
     std::atomic<bool> pending=false;
@@ -97,6 +97,7 @@ struct App {
     void stop();
     void start();
     void consume();
+    std::vector<std::optional<float>> evaluateReadings(std::int64_t now,bool targetReady);
     void updateHighlight();
     void testAction();
     void sampleActionColor(const std::function<aa::Image(HWND,RECT)>& captureFrame={});

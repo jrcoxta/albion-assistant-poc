@@ -330,6 +330,39 @@ int main(int argc,char** argv) {
         check(singleClassFailures==0,"Amostra unica nao pode absorver outro numero ou recorte sem contador");
         custom.setReference({});
         check(custom.recognize(three,64).presence==aa::Presence::Unknown,"Referencia invalida apaga identidade anterior");
+        // Capturas da HUD ultrawide real: medição manual de 38 px para ícone
+        // de 40 px não pode apagar os três stacks. Não são imagens reescaladas.
+        const auto ultrawide=assets.parent_path()/"tests"/"fixtures"/"recognition-ultrawide";
+        auto withClock=recognizer;
+        check(withClock.setClockReference(aa::loadImage(assets/"assassin-clock.png")),"Relogio do exemplo nao carregou");
+        for(const auto* name:{"stacks-3-start.png","stacks-3-middle.png","stacks-3-end.png"}) {
+            const auto frame=aa::loadImage(ultrawide/name);
+            const auto read=recognizer.recognizeNearSize(frame,38);
+            check(read.presence==aa::Presence::Present&&read.stacks==3u,
+                  "Medicao manual dois pixels menor apagou tres stacks na HUD real");
+            const auto timed=withClock.recognizeNearSize(frame,38);
+            check(timed.presence==read.presence&&timed.stacks==read.stacks,
+                  "Relogio alterou identidade ou stacks com tolerancia de tamanho");
+        }
+        for(const auto* name:{"absent-before.png","absent-after.png"})
+            check(recognizer.recognizeNearSize(aa::loadImage(ultrawide/name),38).presence==aa::Presence::Absent,
+                  "Tolerancia de tamanho inventou status ausente na HUD real");
+        const auto realTwo=recognizer.recognizeNearSize(aa::loadImage(ultrawide/"stacks-2.png"),38);
+        // O dígito pequeno já é desconhecido na busca exata em 40 px. Ele pode
+        // continuar desconhecido, mas nunca pode acionar a regra de três.
+        check(realTwo.presence==aa::Presence::Present&&(!realTwo.stacks||realTwo.stacks==2u),
+              "Tolerancia confundiu dois com tres stacks reais");
+        const auto realNoCounter=recognizer.recognizeNearSize(aa::loadImage(ultrawide/"present-no-counter.png"),38);
+        check(realNoCounter.presence==aa::Presence::Present&&!realNoCounter.stacks,
+              "Tolerancia inventou stacks sem numero visivel");
+        check(recognizer.recognizeNearSize({},38).presence==aa::Presence::Unknown,
+              "Tolerancia aceitou captura invalida");
+        auto ambiguous=aa::loadImage(ultrawide/"stacks-3-middle.png");
+        for(int y=94;y<134;++y)for(int x=82;x<122;++x)
+            std::copy_n(ambiguous.bgra.data()+(static_cast<std::size_t>(y)*ambiguous.width+x)*4,4,
+                        ambiguous.bgra.data()+(static_cast<std::size_t>(y)*ambiguous.width+x+90)*4);
+        check(recognizer.recognizeNearSize(ambiguous,38).presence==aa::Presence::Unknown,
+              "Tolerancia escolheu arbitrariamente entre dois icones reais");
         checkGenericCounters();
         checkRadialClock(assets);
         struct RealCase { const char* file; aa::Presence presence; std::optional<unsigned> stacks; };

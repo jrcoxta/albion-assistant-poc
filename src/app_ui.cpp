@@ -576,10 +576,19 @@ void App::refreshStatus() {
         const auto now=static_cast<std::int64_t>(GetTickCount64());
         for(std::size_t i=0;i<plan.readers.size();++i) {
             summary+=plan.readers[i].status.name+L" · "+plan.readers[i].area.name+L": ";
-            if(i>=current.size()||current[i].source!=source||current[i].capturedMs<=0||now-current[i].capturedMs>=workspace.validityMs)
-                summary+=L"aguardando imagem recente";
-            else {
-                const auto& detection=current[i].detection;
+            const bool fresh=i<current.size()&&current[i].source==source&&current[i].capturedMs>0&&
+                now>=current[i].capturedMs&&now-current[i].capturedMs<workspace.validityMs;
+            const aa::Observation* shown=fresh?&current[i]:nullptr;
+            if(!fresh) {
+                summary+=GetForegroundWindow()!=target?L"leitura pausada fora do jogo":L"sem imagem recente";
+                if(i<lastReadings.size()&&lastReadings[i].source==source&&lastReadings[i].capturedMs>0) {
+                    const auto age=std::max<std::int64_t>(0,now-lastReadings[i].capturedMs)/1000;
+                    summary+=L"\r\n  Última leitura (há "+std::to_wstring(age)+L" s; não aciona destaque): ";
+                    shown=&lastReadings[i];
+                }
+            }
+            if(shown) {
+                const auto& detection=shown->detection;
                 if(detection.presence==aa::Presence::Unknown)summary+=L"não confirmado";
                 else if(detection.presence==aa::Presence::Absent)summary+=L"ausente";
                 else summary+=L"identificado · stacks "+(detection.stacks?std::to_wstring(*detection.stacks):L"desconhecidos");
