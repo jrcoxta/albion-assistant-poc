@@ -95,7 +95,7 @@ void Overlay::hide() {
 
 bool Overlay::draw(int iconWidth, int iconHeight) {
     aa::Image image;
-    try { image = aa::renderOverlayEffect(iconWidth, iconHeight, effect_, color_); }
+    try { image = aa::renderOverlayEffect(iconWidth, iconHeight, effect_, color_, shape_); }
     catch (const std::exception&) { return false; }
     if (!image.valid()) return false;
     const int width = image.width, height = image.height;
@@ -143,7 +143,7 @@ void Overlay::update(HWND target, RECT icon, bool highlight) {
     const auto iconHeight = static_cast<std::int64_t>(icon.bottom) - icon.top;
     if (iconWidth <= 0 || iconHeight <= 0 || iconWidth > 16384 || iconHeight > 16384) { hide(); return; }
     const int iw = static_cast<int>(iconWidth), ih = static_cast<int>(iconHeight);
-    auto placement = overlayPlacement(client, icon, origin, aa::overlayEffectPadding(effect_, iw, ih));
+    auto placement = overlayPlacement(client, icon, origin, aa::overlayEffectPadding(effect_, iw, ih, shape_));
     if (!placement) { hide(); return; }
     const bool redraw = !drawn_ || width_ != placement->bitmapSize.cx || height_ != placement->bitmapSize.cy;
     if (redraw && !draw(iw, ih)) { hide(); return; }

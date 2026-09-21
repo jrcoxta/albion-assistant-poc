@@ -77,13 +77,17 @@ bool Recognizer::setStackReference(unsigned value,const Image& image) {
     stackReferences_.push_back({value,image});
     return true;
 }
-Detection Recognizer::recognize(const Image& image,int iconSize) const {
+Detection Recognizer::recognize(const Image& image,int iconSize,RegionShape searchShape) const {
     Detection out;
+    const Region search{0,0,image.width,image.height,searchShape};
     if(!image.valid() || references_.empty() || iconSize<24 || iconSize>256 ||
-        image.width<iconSize || image.height<iconSize) { out.detail="Captura, referencia ou calibracao invalida"; return out; }
+        image.width<iconSize || image.height<iconSize || !search.valid()) { out.detail="Captura, referencia ou calibracao invalida"; return out; }
     std::array<int,3> minimum{255,255,255},maximum{};
     bool informative=false;
     for(std::size_t i=0;i<image.bgra.size();i+=4) {
+        if(searchShape==RegionShape::Circle && !search.contains(
+            static_cast<double>((i/4)%image.width)+.5,
+            static_cast<double>((i/4)/image.width)+.5)) continue;
         for(int c=0;c<3;++c) {
             minimum[c]=std::min(minimum[c],int(image.bgra[i+c]));
             maximum[c]=std::max(maximum[c],int(image.bgra[i+c]));
@@ -104,6 +108,8 @@ Detection Recognizer::recognize(const Image& image,int iconSize) const {
         }
     }
     auto errorAt=[&](int left,int top) {
+        // A forma limita os centros desde a busca/refino, sem recortar o contador.
+        if(searchShape==RegionShape::Circle&&!search.contains(left+iconSize/2.0,top+iconSize/2.0))return 2.f;
         float best=2;
         for(const auto& points:patterns) {
             float total=0;

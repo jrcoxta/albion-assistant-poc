@@ -82,6 +82,7 @@ void validate(const Workspace& w) {
         Names areas;
         for (const auto& area : hud.areas) {
             nameValid(area.name); require(areas.insert(area.name).second, "Nome de regiao duplicado na HUD.");
+            require(area.region.shape == RegionShape::Rectangle || area.region.shape == RegionShape::Circle, "Formato de regiao invalido.");
             require(emptyRegion(area.region) || inBounds(hud, area.region), "Regiao fora das dimensoes da HUD.");
             require(area.iconSize >= 24 && area.iconSize <= 256, "Escala do icone invalida.");
         }
@@ -218,6 +219,7 @@ Workspace readWorkspace(const std::filesystem::path& file) {
             a.name = in.text(child, L"name");
             a.region.x = static_cast<int>(in.number(child, L"x", 32768)); a.region.y = static_cast<int>(in.number(child, L"y", 32768));
             a.region.width = static_cast<int>(in.number(child, L"width", 32768)); a.region.height = static_cast<int>(in.number(child, L"height", 32768));
+            if (in.contains(child, L"shape")) a.region.shape = static_cast<RegionShape>(in.number(child, L"shape", 1));
             a.iconSize = static_cast<int>(in.number(child, L"iconSize", 256)); a.iconCalibrated = in.number(child, L"iconCalibrated", 1) != 0;
             h.areas.push_back(std::move(a));
         }
@@ -282,7 +284,7 @@ template<class T> std::wstring uniqueName(const std::vector<T>& values, const st
     }
     nameValid(candidate); return candidate;
 }
-bool sameRegion(const Region& a, const Region& b) { return a.x == b.x && a.y == b.y && a.width == b.width && a.height == b.height; }
+bool sameRegion(const Region& a, const Region& b) { return a.x == b.x && a.y == b.y && a.width == b.width && a.height == b.height && a.shape == b.shape; }
 bool sameHud(const HudLayout& a, const HudLayout& b) {
     if (!sameName(a.name, b.name) || a.clientWidth != b.clientWidth || a.clientHeight != b.clientHeight ||
         a.monitorDpi != b.monitorDpi || a.monitorDevice != b.monitorDevice || a.areas.size() != b.areas.size()) return false;
@@ -416,6 +418,7 @@ void saveWorkspace(const std::filesystem::path& file, const Workspace& w) {
                 const auto child = indexed(section + L".area", j); const auto& a = h.areas[j];
                 text(child, L"name", a.name); number(child, L"x", a.region.x); number(child, L"y", a.region.y);
                 number(child, L"width", a.region.width); number(child, L"height", a.region.height);
+                number(child, L"shape", static_cast<int>(a.region.shape));
                 number(child, L"iconSize", a.iconSize); number(child, L"iconCalibrated", a.iconCalibrated ? 1 : 0);
             }
         }

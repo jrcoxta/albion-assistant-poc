@@ -44,6 +44,35 @@ aa::Image withCounter(aa::Image image,const char* glyph) {
             for(int channel=0;channel<3;++channel) image.bgra[((36+y*3+dy)*64+41+x*3+dx)*4+channel]=255;
     return image;
 }
+void checkCircularSearch(const aa::Recognizer& recognizer,const aa::Image& three) {
+    aa::Image blankCircle{64,64,std::vector<std::uint8_t>(64*64*4,0)};
+    check(recognizer.recognize(blankCircle,32,aa::RegionShape::Circle).presence==aa::Presence::Unknown,"circulo uniforme deve ficar desconhecido");
+    blankCircle.bgra[0]=255;
+    check(recognizer.recognize(blankCircle,32,aa::RegionShape::Circle).presence==aa::Presence::Unknown,"pixel fora do circulo confirmou ausencia em interior uniforme");
+    check(recognizer.recognize(blankCircle,32).presence==aa::Presence::Absent,"fixture retangular com informacao visual mudou");
+    for(int size:{32,64,100}) {
+        const auto icon=resize(three,size);
+        check(recognizer.recognize(icon,size,aa::RegionShape::Circle).stacks==3u,"circulo justo recortou o contador de 3");
+    }
+    const auto icon=resize(three,32);
+    auto outside=place(icon,192,192,0,0);
+    check(recognizer.recognize(outside,32).presence==aa::Presence::Present,"fixture externa nao reconhecida no retangulo");
+    check(recognizer.recognize(outside,32,aa::RegionShape::Circle).presence!=aa::Presence::Present,"status externo acionou busca circular");
+    auto both=outside;
+    for(int y=0;y<32;++y)for(int x=0;x<32;++x) {
+        const auto from=(static_cast<std::size_t>(y)*32+x)*4,to=(static_cast<std::size_t>(y+80)*192+x+80)*4;
+        std::copy_n(icon.bgra.data()+from,4,both.bgra.data()+to);
+        // O candidato interno é ligeiramente menos parecido que o externo.
+        if(x<16&&y<16)both.bgra[to+1]=static_cast<std::uint8_t>(std::min(255,static_cast<int>(both.bgra[to+1])+10));
+    }
+    const auto found=recognizer.recognize(both,32,aa::RegionShape::Circle);
+    check(found.presence==aa::Presence::Present&&found.stacks==3u&&std::abs(found.icon.x-80)<=2&&std::abs(found.icon.y-80)<=2,
+          "candidato externo escondeu interno ou causou ambiguidade circular");
+    check(recognizer.recognize(both,32).presence==aa::Presence::Unknown,"fixture dupla nao produz ambiguidade retangular");
+    check(recognizer.recognize(place(icon,80,64,20,16),32,aa::RegionShape::Circle).presence==aa::Presence::Unknown,
+          "busca circular aceitou geometria nao quadrada");
+    check(recognizer.recognize(three,64,static_cast<aa::RegionShape>(8)).presence==aa::Presence::Unknown,"formato invalido nao bloqueou busca");
+}
 void checkGenericCounters() {
     const auto identity=genericStatus();
     const auto five=withCounter(identity,"11111" "10000" "10000" "11111" "00001" "00001" "11111");
@@ -114,6 +143,7 @@ int main(int argc,char** argv) {
         const auto result=recognizer.recognize(three,64);
         check(result.presence==aa::Presence::Present,"Buff real com 3 deve estar presente");
         check(result.stacks==3u,"Numero real 3 deve ser lido separadamente");
+        checkCircularSearch(recognizer,three);
         check(recognizer.recognize(two,64).stacks==2u,"Numero real 2 deve ser lido");
         const auto noNumber=recognizer.recognize(none,64);
         check(noNumber.presence==aa::Presence::Present && !noNumber.stacks,"Sem numero nao implica 1");

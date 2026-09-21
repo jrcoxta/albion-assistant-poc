@@ -6,6 +6,7 @@
 #include <windowsx.h>
 
 #include <algorithm>
+#include <cmath>
 #include <exception>
 #include <mutex>
 #include <string>
@@ -18,7 +19,9 @@ constexpr int UseButton = 1001;
 constexpr int ManualButton = 1002;
 constexpr int CancelButton = 1003;
 constexpr int CloseButton = 1004;
-constexpr int ToolbarLogicalHeight = 92;
+constexpr int RectangleButton = 1005;
+constexpr int CircleButton = 1006;
+constexpr int ToolbarLogicalHeight = 128;
 constexpr UINT_PTR OwnerTimer = 1;
 
 UINT effectiveUiDpi(UINT requested, int width, int height) {
@@ -26,7 +29,7 @@ UINT effectiveUiDpi(UINT requested, int width, int height) {
     const auto widthCap = static_cast<UINT>(
         std::max(1LL, static_cast<long long>(width) * 96 / 672));
     const auto heightCap = static_cast<UINT>(
-        std::max(1LL, static_cast<long long>(height) * 96 / 330));
+        std::max(1LL, static_cast<long long>(height) * 96 / 432));
     return std::min({requested, widthCap, heightCap});
 }
 
@@ -60,6 +63,13 @@ Region cornersRegion(POINT first, POINT second) {
             std::max(first.y, second.y) - top};
 }
 
+Region circleRegion(POINT center, POINT edge) {
+    const int radius = static_cast<int>(std::lround(std::hypot(
+        static_cast<double>(edge.x) - center.x, static_cast<double>(edge.y) - center.y)));
+    return {static_cast<int>(center.x) - radius, static_cast<int>(center.y) - radius,
+            radius * 2, radius * 2, RegionShape::Circle};
+}
+
 bool validForKind(const Region& region, SelectionKind kind, int width, int height) {
     if (!fits(region, width, height)) return false;
     if (kind == SelectionKind::Icon)
@@ -76,6 +86,8 @@ struct SelectorState {
     HWND manualButton = nullptr;
     HWND cancelButton = nullptr;
     HWND closeButton = nullptr;
+    HWND rectangleButton = nullptr;
+    HWND circleButton = nullptr;
     HFONT font = nullptr;
     bool ownsFont = false;
     UINT dpi = 96;
@@ -85,6 +97,7 @@ struct SelectorState {
     POINT first{};
     POINT cursor{};
     SelectionKind kind = SelectionKind::Buffs;
+    RegionShape shape = RegionShape::Rectangle;
     bool manual = false;
     bool hasFirst = false;
     bool toolbarAtBottom = false;
@@ -123,8 +136,34 @@ struct SelectorState {
     void selectManually() {
         manual = true;
         setCandidate(std::nullopt);
-        updateStatus(L"Clique no primeiro canto. Depois, clique no canto oposto.");
+        updateStatus(shape == RegionShape::Circle
+                         ? L"Clique no centro. Depois, clique na borda para definir o raio."
+                         : L"Clique no primeiro canto. Depois, clique no canto oposto.");
         if (window) SetFocus(window);
+    }
+
+    void updateShapeControls() const {
+        if (rectangleButton)
+            SendMessageW(rectangleButton, BM_SETCHECK,
+                         shape == RegionShape::Rectangle ? BST_CHECKED : BST_UNCHECKED, 0);
+        if (circleButton)
+            SendMessageW(circleButton, BM_SETCHECK,
+                         shape == RegionShape::Circle ? BST_CHECKED : BST_UNCHECKED, 0);
+        if (manualButton)
+            SetWindowTextW(manualButton,
+                           kind == SelectionKind::Icon && shape == RegionShape::Rectangle
+                               ? L"Ajustar manual" : L"Recomeçar");
+    }
+
+    void setShape(RegionShape selectedShape) {
+        if (shape == selectedShape) return;
+        shape = selectedShape;
+        selectManually();
+        if (shape == RegionShape::Rectangle && kind == SelectionKind::Icon && recognizer) {
+            manual = false;
+            updateStatus(L"Clique no ícone para buscar automaticamente. M: ajuste manual · Esc: cancelar.");
+        }
+        updateShapeControls();
     }
 
     void moveToolbar();
@@ -174,7 +213,7 @@ struct SelectorState {
             point.x < panelLeft + panelWidth)
             return;
 
-        if (kind == SelectionKind::Icon && !manual) {
+        if (shape == RegionShape::Rectangle && kind == SelectionKind::Icon && !manual) {
             if (!recognizer) {
                 updateStatus(L"Reconhecimento indisponível. Use Ajustar manual ou pressione M.");
                 return;
@@ -200,20 +239,31 @@ struct SelectorState {
         if (candidate) setCandidate(std::nullopt);
         if (!hasFirst) {
             first = point;
+            cursor = point;
             hasFirst = true;
-            updateStatus(L"Agora clique no canto oposto. Esc cancela.");
+            updateStatus(shape == RegionShape::Circle
+                             ? L"Agora clique na borda para definir o raio. Esc cancela."
+                             : L"Agora clique no canto oposto. Esc cancela.");
             return;
         }
 
         std::optional<Region> selected;
-        if (kind == SelectionKind::Icon)
+        if (shape == RegionShape::Circle)
+            selected = circleRegion(first, point);
+        else if (kind == SelectionKind::Icon)
             selected = manualIconRegion(first, point, snapshot->width, snapshot->height);
         else
             selected = cornersRegion(first, point);
 
         if (!selected || !validForKind(*selected, kind, snapshot->width, snapshot->height)) {
             hasFirst = false;
-            if (kind == SelectionKind::Icon)
+            if (shape == RegionShape::Circle)
+                updateStatus(kind == SelectionKind::Icon
+                                 ? L"Círculo inteiro na imagem, diâmetro de 24 a 256 px. Tente novamente."
+                                 : kind == SelectionKind::Buffs
+                                       ? L"Círculo inteiro na imagem, diâmetro mínimo de 24 px. Tente novamente."
+                                       : L"Círculo inteiro na imagem, diâmetro mínimo de 8 px. Tente novamente.");
+            else if (kind == SelectionKind::Icon)
                 updateStatus(L"O ícone deve formar um quadrado de 24 a 256 px. Selecione novamente.");
             else if (kind == SelectionKind::Buffs)
                 updateStatus(L"A área de leitura precisa comportar pelo menos um ícone. Selecione novamente.");
@@ -236,6 +286,8 @@ struct ControlLayout {
     RECT manual{};
     RECT cancel{};
     RECT close{};
+    RECT rectangle{};
+    RECT circle{};
 };
 
 RECT controlRect(int x, int y, int width, int height) {
@@ -243,27 +295,29 @@ RECT controlRect(int x, int y, int width, int height) {
 }
 
 ControlLayout controlLayout(const SelectorState& state, int width) {
-    const bool icon = state.kind == SelectionKind::Icon;
     const int gap = state.px(10);
     const int useWidth = state.px(128);
     const int manualWidth = state.px(132);
     const int cancelWidth = state.px(92);
-    const int total = useWidth + cancelWidth + gap + (icon ? manualWidth + gap : 0);
+    const int total = useWidth + cancelWidth + manualWidth + gap * 2;
     int x = std::max(state.px(8), (width - total) / 2);
-    const int y = state.toolbarTop() + state.px(50);
+    const int y = state.toolbarTop() + state.px(86);
     const int height = state.px(30);
     ControlLayout layout{};
     layout.use = controlRect(x, y, useWidth, height);
     x += useWidth + gap;
-    if (icon) {
-        layout.manual = controlRect(x, y, manualWidth, height);
-        x += manualWidth + gap;
-    }
+    layout.manual = controlRect(x, y, manualWidth, height);
+    x += manualWidth + gap;
     layout.cancel = controlRect(x, y, cancelWidth, height);
     layout.close = controlRect(std::max(state.px(4), width - state.px(42)),
                                state.toolbarTop() + state.px(8),
                                state.px(34),
                                state.px(28));
+    const int shapeWidth = state.px(124);
+    const int shapeX = (width - shapeWidth * 2 - gap) / 2;
+    const int shapeY = state.toolbarTop() + state.px(50);
+    layout.rectangle = controlRect(shapeX, shapeY, shapeWidth, height);
+    layout.circle = controlRect(shapeX + shapeWidth + gap, shapeY, shapeWidth, height);
     return layout;
 }
 
@@ -280,9 +334,11 @@ void positionControl(HWND control, const RECT& rect) {
 void layoutControls(SelectorState& state, int width) {
     const auto layout = controlLayout(state, width);
     positionControl(state.useButton, layout.use);
-    if (state.kind == SelectionKind::Icon) positionControl(state.manualButton, layout.manual);
+    positionControl(state.manualButton, layout.manual);
     positionControl(state.cancelButton, layout.cancel);
     positionControl(state.closeButton, layout.close);
+    positionControl(state.rectangleButton, layout.rectangle);
+    positionControl(state.circleButton, layout.circle);
 }
 
 void SelectorState::moveToolbar() {
@@ -308,8 +364,7 @@ void createControls(SelectorState& state) {
     state.manualButton = CreateWindowExW(0,
                                          L"BUTTON",
                                          L"Ajustar manual",
-                                         WS_CHILD | WS_TABSTOP |
-                                             (state.kind == SelectionKind::Icon ? WS_VISIBLE : 0U),
+                                         WS_CHILD | WS_VISIBLE | WS_TABSTOP,
                                          0,
                                          0,
                                          0,
@@ -342,10 +397,25 @@ void createControls(SelectorState& state) {
                                         reinterpret_cast<HMENU>(static_cast<INT_PTR>(CloseButton)),
                                         instance,
                                         nullptr);
+    state.rectangleButton = CreateWindowExW(0, L"BUTTON", L"Retângulo",
+                                             WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_GROUP |
+                                                 BS_AUTORADIOBUTTON | BS_PUSHLIKE,
+                                             0, 0, 0, 0, state.window,
+                                             reinterpret_cast<HMENU>(static_cast<INT_PTR>(RectangleButton)),
+                                             instance, nullptr);
+    state.circleButton = CreateWindowExW(0, L"BUTTON", L"Círculo",
+                                          WS_CHILD | WS_VISIBLE | WS_TABSTOP |
+                                              BS_AUTORADIOBUTTON | BS_PUSHLIKE,
+                                          0, 0, 0, 0, state.window,
+                                          reinterpret_cast<HMENU>(static_cast<INT_PTR>(CircleButton)),
+                                          instance, nullptr);
     setControlFont(state.useButton, state.font);
     setControlFont(state.manualButton, state.font);
     setControlFont(state.cancelButton, state.font);
     setControlFont(state.closeButton, state.font);
+    setControlFont(state.rectangleButton, state.font);
+    setControlFont(state.circleButton, state.font);
+    state.updateShapeControls();
     state.updateUseButton();
     layoutControls(state, state.snapshot->width);
 }
@@ -372,6 +442,31 @@ void paintSnapshot(HDC dc, const Image& image) {
                       DIB_RGB_COLORS);
 }
 
+void paintOutline(HDC dc, const Region& shown, COLORREF accent, int guideSize) {
+    const HGDIOBJ previousBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
+    HPEN pen = CreatePen(PS_SOLID, 3, accent);
+    const HGDIOBJ previousPen = SelectObject(dc, pen);
+    if (shown.shape == RegionShape::Circle) {
+        HPEN boundsPen = CreatePen(PS_DOT, 1, RGB(100, 117, 124));
+        SelectObject(dc, boundsPen);
+        Rectangle(dc, shown.x, shown.y, shown.x + shown.width, shown.y + shown.height);
+        SelectObject(dc, pen);
+        DeleteObject(boundsPen);
+        Ellipse(dc, shown.x, shown.y, shown.x + shown.width, shown.y + shown.height);
+        const int centerX = shown.x + shown.width / 2;
+        const int centerY = shown.y + shown.height / 2;
+        MoveToEx(dc, centerX - guideSize, centerY, nullptr);
+        LineTo(dc, centerX + guideSize + 1, centerY);
+        MoveToEx(dc, centerX, centerY - guideSize, nullptr);
+        LineTo(dc, centerX, centerY + guideSize + 1);
+    } else {
+        Rectangle(dc, shown.x, shown.y, shown.x + shown.width, shown.y + shown.height);
+    }
+    SelectObject(dc, previousBrush);
+    SelectObject(dc, previousPen);
+    DeleteObject(pen);
+}
+
 void paintSelection(HDC dc, const SelectorState& state) {
     Region shown{};
     bool hasShown = false;
@@ -379,33 +474,48 @@ void paintSelection(HDC dc, const SelectorState& state) {
         shown = *state.candidate;
         hasShown = true;
     } else if (state.hasFirst) {
-        shown = cornersRegion(state.first, state.cursor);
+        if (state.shape == RegionShape::Circle)
+            shown = circleRegion(state.first, state.cursor);
+        else if (state.kind == SelectionKind::Icon) {
+            const auto icon = manualIconRegion(state.first, state.cursor,
+                                                state.snapshot->width, state.snapshot->height);
+            shown = icon.value_or(cornersRegion(state.first, state.cursor));
+        } else
+            shown = cornersRegion(state.first, state.cursor);
         hasShown = true;
     }
 
     const COLORREF accent = state.kind == SelectionKind::Highlight ? RGB(255, 190, 30)
                                                                    : RGB(0, 238, 210);
-    HPEN pen = CreatePen(PS_SOLID, 3, accent);
-    const HGDIOBJ previousPen = SelectObject(dc, pen);
-    const HGDIOBJ previousBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
-    if (hasShown)
-        Rectangle(dc, shown.x, shown.y, shown.x + shown.width, shown.y + shown.height);
-    else {
+    if (hasShown) paintOutline(dc, shown, accent, state.px(6));
+    if (!hasShown || (state.hasFirst && state.shape == RegionShape::Circle)) {
+        HPEN pen = CreatePen(PS_SOLID, 1, accent);
+        const HGDIOBJ previousPen = SelectObject(dc, pen);
+        if (state.hasFirst) {
+            MoveToEx(dc, state.first.x, state.first.y, nullptr);
+            LineTo(dc, state.cursor.x, state.cursor.y);
+        }
         MoveToEx(dc, state.cursor.x - 12, state.cursor.y, nullptr);
         LineTo(dc, state.cursor.x + 13, state.cursor.y);
         MoveToEx(dc, state.cursor.x, state.cursor.y - 12, nullptr);
         LineTo(dc, state.cursor.x, state.cursor.y + 13);
+        SelectObject(dc, previousPen);
+        DeleteObject(pen);
     }
-    SelectObject(dc, previousBrush);
-    SelectObject(dc, previousPen);
-    DeleteObject(pen);
+}
+
+int previewCaptionHeight(const SelectorState& state) {
+    return state.px(state.shape == RegionShape::Circle && state.kind == SelectionKind::Icon
+                        ? 80 : 28);
 }
 
 bool previewFits(const SelectorState& state) {
     const int preview = state.px(176);
     const int y = state.toolbarAtBottom ? state.px(18)
                                         : state.toolbarHeight() + state.px(18);
-    return y + preview + state.px(28) < state.snapshot->height;
+    const int bottom = state.toolbarAtBottom ? state.toolbarTop() - state.px(8)
+                                             : state.snapshot->height;
+    return y + preview + previewCaptionHeight(state) < bottom;
 }
 
 void paintPreview(HDC dc, const SelectorState& state, const BITMAPINFO& info) {
@@ -420,7 +530,7 @@ void paintPreview(HDC dc, const SelectorState& state, const BITMAPINFO& info) {
     RECT background{x - state.px(6),
                     y - state.px(6),
                     x + preview + state.px(6),
-                    y + preview + state.px(28)};
+                    y + preview + previewCaptionHeight(state)};
     HBRUSH brush = CreateSolidBrush(RGB(17, 19, 24));
     FillRect(dc, &background, brush);
     DeleteObject(brush);
@@ -454,6 +564,11 @@ void paintPreview(HDC dc, const SelectorState& state, const BITMAPINFO& info) {
                   DIB_RGB_COLORS,
                   SRCCOPY);
 
+    if (state.candidate->shape == RegionShape::Circle)
+        paintOutline(dc, {previewX, previewY, previewWidth, previewHeight, RegionShape::Circle},
+                     state.kind == SelectionKind::Highlight ? RGB(255, 190, 30) : RGB(0, 238, 210),
+                     state.px(4));
+
     const std::wstring dimensions = std::to_wstring(state.candidate->width) + L" × " +
                                     std::to_wstring(state.candidate->height) + L" px";
     RECT label{x,
@@ -467,11 +582,16 @@ void paintPreview(HDC dc, const SelectorState& state, const BITMAPINFO& info) {
               static_cast<int>(dimensions.size()),
               &label,
               DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    if (state.candidate->shape == RegionShape::Circle && state.kind == SelectionKind::Icon) {
+        RECT note{x, y + preview + state.px(27), x + preview,
+                  y + preview + previewCaptionHeight(state) - state.px(3)};
+        DrawTextW(dc, L"Inclua o número.\nOs cantos são mantidos.", -1,
+                  &note, DT_CENTER | DT_WORDBREAK);
+    }
 }
 
-void paint(SelectorState& state) {
-    PAINTSTRUCT paintState{};
-    HDC dc = BeginPaint(state.window, &paintState);
+void paint(SelectorState& state, HDC dc) {
+    SelectObject(dc, state.font);
     paintSnapshot(dc, *state.snapshot);
     paintSelection(dc, state);
 
@@ -498,7 +618,7 @@ void paint(SelectorState& state) {
     RECT textRect{panel.left + state.px(12),
                   panel.top + state.px(5),
                   panel.right - state.px(12),
-                  panel.top + state.px(42)};
+                  panel.top + state.px(40)};
     SetBkMode(dc, TRANSPARENT);
     SetTextColor(dc, RGB(245, 245, 245));
     SelectObject(dc, state.font);
@@ -507,8 +627,7 @@ void paint(SelectorState& state) {
               displayed.c_str(),
               static_cast<int>(displayed.size()),
               &textRect,
-              DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-    EndPaint(state.window, &paintState);
+              DT_CENTER | DT_WORDBREAK);
 }
 
 LRESULT CALLBACK selectorProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -561,6 +680,10 @@ LRESULT CALLBACK selectorProc(HWND window, UINT message, WPARAM wParam, LPARAM l
                 state->accept();
             else if (LOWORD(wParam) == ManualButton)
                 state->selectManually();
+            else if (LOWORD(wParam) == RectangleButton)
+                state->setShape(RegionShape::Rectangle);
+            else if (LOWORD(wParam) == CircleButton)
+                state->setShape(RegionShape::Circle);
             else if (LOWORD(wParam) == CancelButton || LOWORD(wParam) == CloseButton)
                 state->cancel();
         }
@@ -570,8 +693,15 @@ LRESULT CALLBACK selectorProc(HWND window, UINT message, WPARAM wParam, LPARAM l
         return 0;
     case WM_ERASEBKGND:
         return 1;
-    case WM_PAINT:
-        paint(*state);
+    case WM_PAINT: {
+        PAINTSTRUCT paintState{};
+        HDC dc = BeginPaint(window, &paintState);
+        paint(*state, dc);
+        EndPaint(window, &paintState);
+        return 0;
+    }
+    case WM_PRINTCLIENT:
+        paint(*state, reinterpret_cast<HDC>(wParam));
         return 0;
     case WM_CLOSE:
         state->cancel();
@@ -629,7 +759,8 @@ std::optional<Region> selectRegion(HWND owner,
                                    const Image& snapshot,
                                    POINT origin,
                                    SelectionKind kind,
-                                   const Recognizer* recognizer) {
+                                   const Recognizer* recognizer,
+                                   RegionShape initialShape) {
     OwnerRestore ownerRestore{owner, IsWindow(owner) && IsWindowEnabled(owner)};
     if (IsWindow(owner)) EnableWindow(owner, FALSE);
     if (!snapshot.valid() || !IsWindow(target) || !registerSelectorClass()) return std::nullopt;
@@ -642,12 +773,13 @@ std::optional<Region> selectRegion(HWND owner,
     state.recognizer = recognizer;
     state.origin = origin;
     state.kind = kind;
-    state.manual = kind != SelectionKind::Icon || !recognizer;
+    state.shape = initialShape == RegionShape::Circle ? RegionShape::Circle : RegionShape::Rectangle;
+    state.manual = state.shape == RegionShape::Circle || kind != SelectionKind::Icon || !recognizer;
     state.cursor = {snapshot.width / 2, snapshot.height / 2};
-    if (kind == SelectionKind::Icon && recognizer)
+    if (!state.manual)
         state.status = L"Clique no ícone para buscar automaticamente. M: ajuste manual · Esc: cancelar.";
     else
-        state.status = L"Clique no primeiro canto. Depois, clique no canto oposto.";
+        state.selectManually();
 
     const HINSTANCE instance = GetModuleHandleW(nullptr);
     HWND window = CreateWindowExW(WS_EX_TOPMOST | WS_EX_APPWINDOW,
@@ -698,7 +830,7 @@ std::optional<Region> selectRegion(HWND owner,
                 state.accept();
                 continue;
             }
-            if (kind == SelectionKind::Icon && message.wParam == 'M') {
+            if (message.wParam == 'M') {
                 state.selectManually();
                 continue;
             }
@@ -708,6 +840,7 @@ std::optional<Region> selectRegion(HWND owner,
             state.cancel();
             continue;
         }
+        if (belongsToSelector && IsDialogMessageW(state.window, &message)) continue;
         TranslateMessage(&message);
         DispatchMessageW(&message);
     }

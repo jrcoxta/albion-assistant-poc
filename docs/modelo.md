@@ -2,7 +2,7 @@
 
 ## Contrato do produto
 
-HUD configura o computador: resolução, DPI, monitor e regiões nomeadas, com escala do ícone nas regiões de leitura. Status são uma biblioteca compartilhada de buffs/debuffs com ID estável, nome, referência e amostras rotuladas de stacks. Sets possuem listas de regras: status + região de origem + presença/ausência/stacks + efeito/cor + região de destino.
+HUD configura o computador: resolução, DPI, monitor e regiões nomeadas retangulares ou circulares, com escala do ícone nas regiões de leitura. Status são uma biblioteca compartilhada de buffs/debuffs com ID estável, nome, referência e amostras rotuladas de stacks. Sets possuem listas de regras: status + região de origem + presença/ausência/stacks + efeito/cor + região de destino.
 
 Uma HUD não carrega nem apaga regras. Um set não muda coordenadas. Regiões com o mesmo nome em HUDs diferentes permitem reutilizar o mesmo set. Nomes de regiões são únicos na HUD; nomes de entidades são únicos em sua categoria. Referências entre regras e status usam IDs. Regra sem dependência/calibração válida bloqueia início com explicação. O primeiro destaque verdadeiro da lista vence quando duas regras usam o mesmo destino.
 
@@ -10,7 +10,9 @@ Condição de stacks oferece somente valores cadastrados para aquele status. Con
 
 ## Persistência e migração
 
-O efeito pertence à regra: Borda, Brilho, Pulso ou Halo. A região de destino define o espaço transparente da habilidade; a margem externa respeita a janela cliente. A opção Cor da habilidade captura somente o destino uma vez, após salvar o editor, e guarda a cor predominante encontrada. Não altera a origem de leitura nem exige nova medição de ícone. Falhas e imagens sem evidência cromática preservam a cor existente.
+O efeito pertence à regra: Borda, Brilho, Pulso ou Halo. A região de destino define sua forma e posição; a margem externa respeita a janela cliente. Brilho/Pulso acrescentam uma aura translúcida interna e externa, enquanto Borda/Halo mantêm o centro transparente. A opção Cor da habilidade captura somente o destino uma vez, após salvar o editor, e guarda a cor predominante encontrada. Não altera a origem de leitura nem exige nova medição de ícone. Falhas e imagens sem evidência cromática preservam a cor existente.
+
+A forma pertence à região da HUD: `shape=0` é retângulo, `shape=1` é círculo. O campo é opcional no schema 1; ausência significa retângulo. Valor desconhecido ou círculo com largura diferente da altura é recusado sem sobrescrever dados. A seleção circular usa centro e raio, com dois cliques, e exige o círculo inteiro dentro da imagem. Origem e destino são independentes. A captura agregada continua retangular; o reconhecedor filtra centros fora do círculo antes de escolher candidatos e avaliar ambiguidade. O ícone inteiro precisa caber no quadrado da origem. A seleção circular de referência/amostra é uma guia: conserva todos os pixels do quadrado delimitador, inclusive os cantos do contador, sem máscara de transparência na imagem salva.
 
 O campo opcional `effect` de schema 1 tem valores 0–3. Se ausente, `glow=0/1` é lido como Borda/Brilho. Se presente e válido, prevalece; o campo legado também é validado. Gravações novas incluem ambos os campos. Binários antigos com parser estrito não leem o novo campo: esta compatibilidade é de atualização, sem promessa de downgrade.
 

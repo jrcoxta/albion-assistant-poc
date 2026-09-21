@@ -12,6 +12,9 @@ void check(bool value, const char* message) {
 std::size_t at(const aa::Image& image, int x, int y) {
     return (static_cast<std::size_t>(y) * image.width + x) * 4;
 }
+unsigned alphaAt(const aa::Image& image, int x, int y) {
+    return image.bgra[at(image, x, y) + 3];
+}
 aa::Image solid(int width, int height, unsigned r, unsigned g, unsigned b) {
     aa::Image image{width, height, std::vector<std::uint8_t>(static_cast<std::size_t>(width) * height * 4)};
     for (std::size_t i = 0; i < image.bgra.size(); i += 4) {
@@ -32,21 +35,26 @@ void fill(aa::Image& image, int left, int top, int right, int bottom, unsigned r
 }
 void rasterChecks() {
     std::vector<aa::Image> samples;
+    for (const auto shape : {aa::RegionShape::Rectangle, aa::RegionShape::Circle})
     for (const auto effect : {aa::OverlayEffect::Border, aa::OverlayEffect::Glow,
                               aa::OverlayEffect::Pulse, aa::OverlayEffect::Halo}) {
         for (const auto dimensions : {SIZE{48, 48}, SIZE{80, 32}, SIZE{24, 96}}) {
             const int w = dimensions.cx, h = dimensions.cy;
-            const auto image = aa::renderOverlayEffect(w, h, effect, RGB(255, 96, 32));
+            if (shape == aa::RegionShape::Circle && w != h) continue;
+            const bool aura = effect == aa::OverlayEffect::Glow || effect == aa::OverlayEffect::Pulse;
+            const auto image = aa::renderOverlayEffect(w, h, effect, RGB(255, 96, 32), shape);
             check(image.valid(), "O efeito precisa produzir um bitmap válido");
             const int padding = (image.width - w) / 2;
             check(padding > 0 && image.height == h + 2 * padding, "Margem do efeito inconsistente");
-            check(padding == aa::overlayEffectPadding(effect, w, h), "Margem pública não corresponde ao raster");
+            check(padding == aa::overlayEffectPadding(effect, w, h, shape), "Margem pública não corresponde ao raster");
+            const unsigned center = alphaAt(image, padding + w / 2, padding + h / 2);
+            check(aura ? center > 0 && center <= 64 : center == 0,
+                  "Centro deve ser translúcido na aura e transparente no contorno");
             int visible = 0, translucent = 0;
             for (int y = 0; y < image.height; ++y) for (int x = 0; x < image.width; ++x) {
                 const auto i = at(image, x, y);
                 const unsigned alpha = image.bgra[i + 3];
-                if (x >= padding && x < padding + w && y >= padding && y < padding + h)
-                    check(alpha == 0, "Efeito cobriu a habilidade");
+                if (aura) check(alpha < 160, "Aura tornou o ícone opaco");
                 if (x == 0 || y == 0 || x == image.width - 1 || y == image.height - 1)
                     check(alpha <= 1, "Efeito foi cortado na borda do bitmap");
                 check(image.bgra[i] <= alpha && image.bgra[i + 1] <= alpha && image.bgra[i + 2] <= alpha,
@@ -59,6 +67,18 @@ void rasterChecks() {
             }
             check(visible > 50, "Efeito não contém contorno visível");
             if (effect != aa::OverlayEffect::Border) check(translucent > 50, "Aura não tem queda suave de intensidade");
+            if (aura) {
+                const int midY = padding + h / 2;
+                const auto inner = alphaAt(image, padding + w - 4, midY);
+                const auto edge = alphaAt(image, padding + w - 1, midY);
+                const auto outer = alphaAt(image, padding + w + 3, midY);
+                check(inner > center && outer > center && edge >= inner,
+                      "Aura não ilumina os dois lados do contorno");
+                for (int x = padding + w - 8; x < image.width - 1; ++x)
+                    check(std::abs(static_cast<int>(alphaAt(image, x, midY)) -
+                                   static_cast<int>(alphaAt(image, x + 1, midY))) <= 20,
+                          "Aura contém uma borda abrupta de caixa");
+            }
             if (w == 48) samples.push_back(image);
         }
     }
@@ -79,6 +99,28 @@ void rasterChecks() {
     }
     check(!aa::renderOverlayEffect(0, 48, aa::OverlayEffect::Glow, 0).valid(), "Raster aceitou geometria vazia");
     check(!aa::renderOverlayEffect(INT_MAX, INT_MAX, aa::OverlayEffect::Halo, 0).valid(), "Raster aceitou overflow");
+    for (const auto effect : {aa::OverlayEffect::Border, aa::OverlayEffect::Glow,
+                              aa::OverlayEffect::Pulse, aa::OverlayEffect::Halo}) {
+        check(aa::overlayEffectPadding(effect, 80, 32, aa::RegionShape::Circle) == 0 &&
+              !aa::renderOverlayEffect(80, 32, effect, 0, aa::RegionShape::Circle).valid(),
+              "Círculo aceitou geometria não quadrada");
+        check(!aa::renderOverlayEffect(48, 48, effect, 0, static_cast<aa::RegionShape>(9)).valid(),
+              "Raster aceitou formato desconhecido");
+        const auto circle = aa::renderOverlayEffect(100, 100, effect, RGB(90, 200, 255), aa::RegionShape::Circle);
+        const int p = aa::overlayEffectPadding(effect, 100, 100, aa::RegionShape::Circle);
+        // 7,5² + 52,5² == 37,5² + 37,5²: mesma distância no eixo e na diagonal.
+        check(alphaAt(circle, p + 57, p + 102) > 80 &&
+              std::abs(static_cast<int>(alphaAt(circle, p + 57, p + 102)) -
+                       static_cast<int>(alphaAt(circle, p + 87, p + 87))) <= 1,
+              "Círculo não mantém intensidade ao longo do raio");
+        check(alphaAt(circle, p + 99, p + 99) <= 2,
+              "Círculo ainda desenha os cantos de uma caixa");
+        if (effect == aa::OverlayEffect::Halo) {
+            check(alphaAt(circle, p + 103, p + 49) > 100,
+                  "Halo circular não acompanha a circunferência selecionada");
+            check(p <= 18, "Halo circular foi inflado para circunscrever um quadrado");
+        }
+    }
 }
 void placementChecks() {
     const auto full = overlayPlacement({0, 0, 100, 80}, {30, 20, 70, 60}, {-200, 150}, 8);
@@ -173,9 +215,26 @@ void visibilityChecks() {
 }
 
 void saveGallery(const std::filesystem::path& directory) {
-    auto canvas = solid(1100, 340, 14, 19, 28);
+    auto canvas = solid(1320, 630, 14, 19, 28);
+    // Fundo apenas ilustrativo, com variação visível sob a composição translúcida.
+    for (int y = 72; y < 566; ++y) for (int x = 20; x < canvas.width - 20; ++x) {
+        const int texture = static_cast<int>(8 * std::sin(x / 43.0) + 6 * std::cos(y / 31.0) +
+                                             4 * std::sin((x + y) / 17.0));
+        const auto i = at(canvas, x, y);
+        canvas.bgra[i] = static_cast<std::uint8_t>(33 + texture);
+        canvas.bgra[i + 1] = static_cast<std::uint8_t>(51 + texture);
+        canvas.bgra[i + 2] = static_cast<std::uint8_t>(46 + texture);
+    }
     auto icon = aa::loadImage(std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "assassin-none.png");
     const auto color = aa::skillAccentColor(icon).value_or(RGB(210, 100, 255));
+    // Somente a prancha recorta o fundo antigo: círculo com 1 px de transição, asset preservado.
+    const double iconRadius = std::min(icon.width, icon.height) / 2.0;
+    for (int y = 0; y < icon.height; ++y) for (int x = 0; x < icon.width; ++x) {
+        const double coverage = std::clamp(iconRadius - std::hypot(x + 0.5 - icon.width / 2.0,
+                                                                  y + 0.5 - icon.height / 2.0), 0.0, 1.0);
+        const auto i = at(icon, x, y);
+        icon.bgra[i + 3] = static_cast<std::uint8_t>(std::lround(icon.bgra[i + 3] * coverage));
+    }
     for (std::size_t i = 0; i < icon.bgra.size(); i += 4)
         for (int channel = 0; channel < 3; ++channel)
             icon.bgra[i + channel] = static_cast<std::uint8_t>((icon.bgra[i + channel] * icon.bgra[i + 3] + 127) / 255);
@@ -189,13 +248,16 @@ void saveGallery(const std::filesystem::path& directory) {
                     (canvas.bgra[dst + channel] * (255 - alpha) + 127) / 255);
         }
     };
-    const aa::OverlayEffect effects[] = {aa::OverlayEffect::Border, aa::OverlayEffect::Glow,
-        aa::OverlayEffect::Pulse, aa::OverlayEffect::Pulse, aa::OverlayEffect::Halo};
-    for (int cell = 0; cell < 5; ++cell) {
-        const auto effect = aa::renderOverlayEffect(icon.width, icon.height, effects[cell], color);
-        compose(icon, 110 + cell * 220 - icon.width / 2, 170 - icon.height / 2, 255);
-        compose(effect, 110 + cell * 220 - effect.width / 2, 170 - effect.height / 2,
-                aa::overlayEffectOpacity(effects[cell], cell == 3 ? 750 : 0));
+    const aa::OverlayEffect effects[] = {aa::OverlayEffect::Border, aa::OverlayEffect::Border,
+        aa::OverlayEffect::Glow, aa::OverlayEffect::Pulse, aa::OverlayEffect::Pulse, aa::OverlayEffect::Halo};
+    for (int row = 0; row < 2; ++row) for (int cell = 0; cell < 6; ++cell) {
+        const auto shape = row == 0 ? aa::RegionShape::Rectangle : aa::RegionShape::Circle;
+        const int centerX = 110 + cell * 220, centerY = 182 + row * 250;
+        compose(icon, centerX - icon.width / 2, centerY - icon.height / 2, 255);
+        if (cell == 0) continue;
+        const auto effect = aa::renderOverlayEffect(icon.width, icon.height, effects[cell], color, shape);
+        compose(effect, centerX - effect.width / 2, centerY - effect.height / 2,
+                aa::overlayEffectOpacity(effects[cell], cell == 4 ? 750 : 0));
     }
     BITMAPINFO info{};
     info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -210,13 +272,20 @@ void saveGallery(const std::filesystem::path& directory) {
     const auto oldBitmap = SelectObject(dc, bitmap), oldFont = SelectObject(dc, font);
     std::memcpy(bits, canvas.bgra.data(), canvas.bgra.size());
     SetBkMode(dc, TRANSPARENT); SetTextColor(dc, RGB(228, 235, 247));
-    RECT heading{20, 20, 1080, 54};
-    DrawTextW(dc, L"Prévias do overlay · cor extraída do ícone · centro preservado", -1, &heading, DT_CENTER | DT_SINGLELINE);
-    const wchar_t* labels[] = {L"Borda", L"Brilho", L"Pulso · forte", L"Pulso · suave", L"Halo"};
-    for (int cell = 0; cell < 5; ++cell) {
-        RECT label{cell * 220, 254, (cell + 1) * 220, 288};
+    RECT heading{20, 20, 1300, 54};
+    DrawTextW(dc, L"Prévias do overlay · cor extraída do ícone · aura translúcida", -1, &heading, DT_CENTER | DT_SINGLELINE);
+    const wchar_t* labels[] = {L"Sem efeito", L"Borda", L"Brilho", L"Pulso · forte", L"Pulso · suave", L"Halo"};
+    for (int row = 0; row < 2; ++row) {
+        RECT label{36, 86 + row * 250, 360, 118 + row * 250};
+        DrawTextW(dc, row == 0 ? L"Área retangular" : L"Área circular", -1, &label, DT_LEFT | DT_SINGLELINE);
+    }
+    for (int row = 0; row < 2; ++row) for (int cell = 0; cell < 6; ++cell) {
+        RECT label{cell * 220, 244 + row * 250, (cell + 1) * 220, 278 + row * 250};
         DrawTextW(dc, labels[cell], -1, &label, DT_CENTER | DT_SINGLELINE);
     }
+    RECT footer{20, 588, 1300, 620};
+    DrawTextW(dc, L"Fundo ilustrativo e ícone real · simulação de composição, não captura do jogo", -1,
+              &footer, DT_CENTER | DT_SINGLELINE);
     std::memcpy(canvas.bgra.data(), bits, canvas.bgra.size());
     for (std::size_t i = 3; i < canvas.bgra.size(); i += 4) canvas.bgra[i] = 255;
     SelectObject(dc, oldFont); SelectObject(dc, oldBitmap);

@@ -18,7 +18,7 @@ MonitorPlan makeMonitorPlan(const Workspace& workspace){
             if(status==workspace.statuses.end()||area==hud->areas.end())throw std::runtime_error("Dependência da regra ausente.");
             result.readers.push_back({*status,*area});
             const auto r=area->region;
-            if(!result.captureArea.valid())result.captureArea=r;
+            if(!result.captureArea.valid()){result.captureArea=r;result.captureArea.shape=RegionShape::Rectangle;}
             else{
                 const int right=std::max(result.captureArea.x+result.captureArea.width,r.x+r.width);
                 const int bottom=std::max(result.captureArea.y+result.captureArea.height,r.y+r.height);

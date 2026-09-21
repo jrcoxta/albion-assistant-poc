@@ -6,53 +6,51 @@
 #include <numbers>
 
 namespace aa {
-int overlayEffectPadding(OverlayEffect effect, int iconWidth, int iconHeight) {
-    if (iconWidth <= 0 || iconHeight <= 0 || iconWidth > 16384 || iconHeight > 16384) return 0;
+int overlayEffectPadding(OverlayEffect effect, int iconWidth, int iconHeight, RegionShape shape) {
+    if (iconWidth <= 0 || iconHeight <= 0 || iconWidth > 16384 || iconHeight > 16384 ||
+        (shape != RegionShape::Rectangle && shape != RegionShape::Circle) ||
+        (shape == RegionShape::Circle && iconWidth != iconHeight)) return 0;
     switch (effect) {
     case OverlayEffect::Border: return 6;
     case OverlayEffect::Glow:
-    case OverlayEffect::Pulse: return 18;
-    case OverlayEffect::Halo:
-        return static_cast<int>(std::ceil(std::max(iconWidth, iconHeight) * 0.208)) + 16;
+    case OverlayEffect::Pulse: return 24;
+    case OverlayEffect::Halo: return 16;
     }
     return 0;
 }
 
-Image renderOverlayEffect(int iconWidth, int iconHeight, OverlayEffect effect, std::uint32_t color) {
-    const int padding = overlayEffectPadding(effect, iconWidth, iconHeight);
+Image renderOverlayEffect(int iconWidth, int iconHeight, OverlayEffect effect, std::uint32_t color, RegionShape shape) {
+    const int padding = overlayEffectPadding(effect, iconWidth, iconHeight, shape);
     if (!padding) return {};
     const int width = iconWidth + 2 * padding, height = iconHeight + 2 * padding;
     if (static_cast<std::uint64_t>(width) * height > 64000000) return {};
     Image image{width, height, std::vector<std::uint8_t>(static_cast<std::size_t>(width) * height * 4)};
     const double halfWidth = iconWidth / 2.0, halfHeight = iconHeight / 2.0;
-    const double radius = effect == OverlayEffect::Border ? 5.0 : std::min(halfWidth, halfHeight) * 0.32 + 2.0;
-    const double extension = effect == OverlayEffect::Border ? 2.5 : 2.0;
-    const double ellipseX = halfWidth * std::numbers::sqrt2 + 3.0;
-    const double ellipseY = halfHeight * std::numbers::sqrt2 + 3.0;
+    const double radius = std::min({5.0, halfWidth, halfHeight});
+    const bool aura = effect == OverlayEffect::Glow || effect == OverlayEffect::Pulse;
     const unsigned red = color & 255u, green = (color >> 8) & 255u, blue = (color >> 16) & 255u;
     for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x) {
-        if (x >= padding && x < padding + iconWidth && y >= padding && y < padding + iconHeight) continue;
         const double dx = std::abs(x + 0.5 - padding - halfWidth);
         const double dy = std::abs(y + 0.5 - padding - halfHeight);
+        const double qx = dx - (halfWidth - radius), qy = dy - (halfHeight - radius);
+        const double distance = shape == RegionShape::Circle ? std::hypot(dx, dy) - halfWidth :
+            std::hypot(std::max(qx, 0.0), std::max(qy, 0.0)) + std::min(std::max(qx, qy), 0.0) - radius;
+        // Contornos preservam o interior; somente a aura ilumina por cima da habilidade.
+        if (!aura && distance < 0) continue;
         double intensity = 0;
         if (effect == OverlayEffect::Halo) {
-            const double normalized = std::hypot(dx / ellipseX, dy / ellipseY);
-            const double distance = std::hypot(dx, dy) * std::abs(1.0 - 1.0 / normalized);
-            if (distance < 11.0)
-                intensity = 0.72 * std::exp(-0.5 * distance * distance / (3.8 * 3.8)) +
-                            0.25 * std::exp(-0.5 * distance * distance / (1.2 * 1.2));
+            const double ring = distance - 3.0;
+            if (std::abs(ring) < 11.0)
+                intensity = 0.72 * std::exp(-0.5 * ring * ring / (3.8 * 3.8)) +
+                            0.25 * std::exp(-0.5 * ring * ring / (1.2 * 1.2));
+        } else if (effect == OverlayEffect::Border) {
+            intensity = std::clamp(1.6 - std::abs(distance - 2.5), 0.0, 1.0);
         } else {
-            // Distância a um retângulo arredondado: cantos suaves sem pintar o ícone.
-            const double qx = dx - (halfWidth + extension - radius);
-            const double qy = dy - (halfHeight + extension - radius);
-            const double distance = std::hypot(std::max(qx, 0.0), std::max(qy, 0.0)) +
-                                    std::min(std::max(qx, qy), 0.0) - radius;
-            if (effect == OverlayEffect::Border) intensity = std::clamp(1.6 - std::abs(distance), 0.0, 1.0);
-            else if (distance < 15.0) {
-                const double outside = std::max(distance, 0.0);
-                intensity = 0.88 * std::exp(-0.5 * outside * outside / (4.5 * 4.5)) +
-                            0.10 * std::exp(-0.5 * outside * outside / (8.0 * 8.0));
-            }
+            // Gradiente contínuo dentro/fora, com centro levemente colorido e pico translúcido.
+            const double outside = std::max(distance, 0.0);
+            intensity = 0.40 * std::exp(-0.5 * distance * distance / (5.5 * 5.5)) +
+                        0.08 * std::exp(-0.5 * distance * distance / (8.0 * 8.0)) +
+                        0.06 * std::exp(-0.5 * outside * outside / (8.0 * 8.0));
         }
         const unsigned alpha = static_cast<unsigned>(std::lround(std::clamp(intensity, 0.0, 1.0) * 255));
         const auto i = (static_cast<std::size_t>(y) * width + x) * 4;

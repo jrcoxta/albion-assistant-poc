@@ -162,6 +162,12 @@ int wmain(int argc,wchar_t** argv){
             require(!app.item(CalibrateArea)&&shows(app,L"Não precisa medir ícone"),"destino E pede medição de ícone");
             require(aa::readinessIssues(app.workspace).empty(),"destino não medido bloqueia a regra");
             screenshot(app,pictures,L"ui-hud-destino.png");
+            app.area()->region.shape=aa::RegionShape::Circle;app.makeUI();
+            require(shows(app,L"Área circular salva")&&!app.item(CalibrateArea),"destino circular perdeu forma na interface ou exigiu medição");
+            app.saveEditor();require(aa::loadWorkspace(app.workspacePath,{}).huds[1].areas[1].region.shape==aa::RegionShape::Circle,
+                "interface não preservou formato da área");
+            screenshot(app,pictures,L"ui-hud-circulo.png");
+            app.area()->region.shape=aa::RegionShape::Rectangle;
             app.area()->iconCalibrated=true;app.area()->iconSize=57;app.makeUI();
             require(!app.item(CalibrateArea)&&!shows(app,L"57 px"),"destino mostra medição de ícone sem uso");
             choose(app,AreaList,2,true);
@@ -293,9 +299,11 @@ int wmain(int argc,wchar_t** argv){
         confirmDeleteHud(app,IDYES);require(app.workspace.huds.size()==2&&app.workspace.activeHudId!=created&&app.workspace.statuses.size()==2&&app.set()->rules.size()==2,"excluir HUD alterou biblioteca/set");
         choose(app,HudList,0);tab(app,3);app.selectedRule=0;app.makeUI();
         const auto screen=screenOf(app.target);app.hud()->monitorDpi=screen.dpi;app.hud()->monitorDevice=screen.device;
+        app.hud()->areas[1].region.shape=aa::RegionShape::Circle;
         app.current={{{aa::Presence::Present,3,1.0f,{},{}},static_cast<std::int64_t>(GetTickCount64()),app.source}};
         app.latest=app.current;app.pending=true;app.running=true;const auto oldSource=app.source;
         app.testAction();require(!app.running&&app.source>oldSource&&!app.pending&&app.current.empty()&&app.latest.empty(),"teste visual preservou leitura anterior");
+        require(app.previewTarget.shape==aa::RegionShape::Circle,"teste de destaque perdeu a forma circular do destino");
         require(app.previewUntil>GetTickCount64()&&app.previewUntil<=GetTickCount64()+5000,"teste visual sem limite de cinco segundos");
         app.previewUntil=GetTickCount64()-1;app.updateHighlight();require(app.previewUntil==0&&!app.running,"teste expirado reiniciou leitura");
         app.previewUntil=GetTickCount64()+5000;app.stop();require(app.previewUntil==0,"Parar não encerrou teste visual");

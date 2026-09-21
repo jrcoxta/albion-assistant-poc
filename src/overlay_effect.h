@@ -1,14 +1,16 @@
 #pragma once
 #include "image.h"
+#include "model.h"
 #include <cstdint>
 #include <optional>
 
 namespace aa {
 enum class OverlayEffect { Border = 0, Glow = 1, Pulse = 2, Halo = 3 };
 
-// O bitmap é BGRA premultiplicado; o retângulo inteiro da habilidade fica vazio.
-int overlayEffectPadding(OverlayEffect effect, int iconWidth, int iconHeight);
-Image renderOverlayEffect(int iconWidth, int iconHeight, OverlayEffect effect, std::uint32_t color);
+// BGRA premultiplicado; brilho e pulso também iluminam a habilidade com baixa opacidade.
+int overlayEffectPadding(OverlayEffect effect, int iconWidth, int iconHeight, RegionShape shape = RegionShape::Rectangle);
+Image renderOverlayEffect(int iconWidth, int iconHeight, OverlayEffect effect, std::uint32_t color,
+                          RegionShape shape = RegionShape::Rectangle);
 std::uint8_t overlayEffectOpacity(OverlayEffect effect, std::uint64_t elapsedMs);
 
 // COLORREF: r | (g << 8) | (b << 16). Imagem neutra não inventa uma cor.

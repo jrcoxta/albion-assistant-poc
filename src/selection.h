@@ -28,6 +28,7 @@ std::optional<Region> selectRegion(HWND owner,
                                    const Image& snapshot,
                                    POINT origin,
                                    SelectionKind kind,
-                                   const Recognizer* recognizer);
+                                   const Recognizer* recognizer,
+                                   RegionShape initialShape = RegionShape::Rectangle);
 
 } // namespace aa

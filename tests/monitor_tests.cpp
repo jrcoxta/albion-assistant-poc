@@ -25,6 +25,17 @@ int main(){try{
     require(plan.captureArea.x==10&&plan.captureArea.y==20&&plan.captureArea.width==200&&plan.captureArea.height==120,"ROI agregada incorreta");
     require(plan.actions[1].rule.effect==aa::OverlayEffect::Pulse&&plan.actions[1].target.x==300,"acao/posicao nao preservada");
     require(plan.readers[0].needsStacks&&!plan.readers[1].needsStacks,"presença/ausência exigiu contadores");
+    {
+        auto circular=w;
+        circular.huds[0].areas[0].region={10,20,80,80,aa::RegionShape::Circle};
+        circular.huds[0].areas[3].region.shape=aa::RegionShape::Circle;
+        const auto shaped=aa::makeMonitorPlan(circular);
+        require(shaped.captureArea.shape==aa::RegionShape::Rectangle&&shaped.captureArea.valid()&&shaped.captureArea.width==160&&shaped.captureArea.height==120,
+                "uniao de origens circulares nao ficou retangular");
+        require(shaped.readers[0].area.region.shape==aa::RegionShape::Circle&&shaped.readers[1].area.region.shape==aa::RegionShape::Rectangle&&
+                shaped.actions[0].target.shape==aa::RegionShape::Circle&&shaped.actions[1].target.shape==aa::RegionShape::Rectangle,
+                "forma de origem/destino foi perdida ou contaminou outra area");
+    }
     std::vector<aa::Observation> obs={{{aa::Presence::Present,3,1,{},{}},1000,7},{{aa::Presence::Absent,{},1,{},{}},1000,7}};
     require(aa::evaluateMonitor(plan,obs,1000,750,7)==std::vector<bool>({true,false,false}),"prioridade de destino ou condicao incorreta");
     obs[0].detection.stacks=2;obs[1].detection.presence=aa::Presence::Present;

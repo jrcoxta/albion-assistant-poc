@@ -86,8 +86,10 @@ AreaUsage areaUsage(const aa::Workspace& workspace,const std::wstring& name) {
     return usage;
 }
 std::wstring regionText(const aa::HudArea& area,AreaUsage usage) {
-    if(!area.region.valid())return L"Área ainda não selecionada. Use dois cliques para marcar os cantos.";
-    auto value=L"Área salva: "+std::to_wstring(area.region.width)+L" × "+std::to_wstring(area.region.height)+L" px.\n";
+    if(!area.region.valid())return L"Área ainda não selecionada. Escolha Retângulo ou Círculo no seletor.";
+    auto value=area.region.shape==aa::RegionShape::Circle?
+        L"Área circular salva: "+std::to_wstring(area.region.width)+L" px de diâmetro.\n":
+        L"Área retangular salva: "+std::to_wstring(area.region.width)+L" × "+std::to_wstring(area.region.height)+L" px.\n";
     if(usage.highlight&&!usage.read)return value+L"Uso: receber destaque.\nNão precisa medir ícone. A área define o destaque.";
     value+=usage.read?(usage.highlight?L"Uso: buscar status e receber destaque.\n":L"Uso: buscar status.\n"):
         L"Sem uso nas regras. Área pronta para destaque.\n";
@@ -193,7 +195,9 @@ void App::makeUI() {
         button(L"Selecionar área",SelectArea,282,347,258);
         if(area()&&(usage.read||!usage.highlight))button(usage.read?L"Medir ícone de status":L"Medir ícone (opcional)",CalibrateArea,558,347,274);
         label(area()?regionText(*area(),usage).c_str():L"Crie uma área para ler status ou receber um destaque.",282,395,550,76);
-        label(L"Use nomes iguais em HUDs diferentes para reutilizar seus sets.\nRenomear uma área exige atualizar o nome nas regras correspondentes.",282,479,550,60);
+        const bool circularRead=area()&&area()->region.shape==aa::RegionShape::Circle&&areaUsage(workspace,area()->name).read;
+        label(circularRead?L"Enquadre o ícone inteiro; centros fora do círculo são ignorados.\nUse nomes iguais em HUDs diferentes para reutilizar seus sets.\nAo renomear uma área, atualize também as regras.":
+            L"Use nomes iguais em HUDs diferentes para reutilizar seus sets.\nRenomear uma área exige atualizar o nome nas regras correspondentes.",282,479,550,60);
         button(L"Nova área",NewArea,24,547,112);button(L"Excluir área",DeleteArea,148,547,114);button(L"Salvar HUD",Save,664,547,168);
         for(int id:{HudName,DeleteHud,NewArea,Save})EnableWindow(item(id),hud()!=nullptr);
         for(int id:{AreaName,DeleteArea,SelectArea})EnableWindow(item(id),area()!=nullptr);
@@ -414,7 +418,7 @@ void App::command(int id,int notification) {
         if(!currentHud)throw std::runtime_error("Crie uma HUD antes de adicionar áreas.");
         if(currentHud->areas.size()>=32)throw std::runtime_error("O limite é de 32 áreas por HUD.");
         currentHud->areas.push_back({uniqueName(currentHud->areas,L"Nova área"),{},48,false});selectedArea=static_cast<int>(currentHud->areas.size())-1;
-        focus=AreaName;error=L"Área criada. Dê um nome e selecione os cantos no jogo.";break;
+        focus=AreaName;error=L"Área criada. Dê um nome e escolha Retângulo ou Círculo ao selecionar.";break;
     case DeleteArea:
         if(!currentHud||!area())return;
         currentHud->areas.erase(currentHud->areas.begin()+selectedArea);selectedArea=-1;
@@ -423,7 +427,8 @@ void App::command(int id,int notification) {
         if(!currentHud||!area())throw std::runtime_error("Crie e escolha uma área primeiro.");
         if(target&&IsWindow(target))confirmGeometry(*currentHud,screenOf(target));
         if(id==CalibrateArea&&!area()->region.valid())throw std::runtime_error("Selecione a área antes de medir um ícone de status dentro dela.");
-        auto chosen=pick(id==SelectArea?aa::SelectionKind::Highlight:aa::SelectionKind::Icon,nullptr);
+        auto chosen=pick(id==SelectArea?aa::SelectionKind::Highlight:aa::SelectionKind::Icon,nullptr,
+                         id==SelectArea?area()->region.shape:aa::RegionShape::Circle);
         if(!chosen){error=L"Seleção cancelada. Os dados anteriores foram mantidos.";refreshStatus();return;}
         confirmGeometry(*currentHud,chosen->screen);auto& value=currentHud->areas[static_cast<std::size_t>(selectedArea)];
         if(id==SelectArea) {
@@ -431,7 +436,7 @@ void App::command(int id,int notification) {
             value.region=chosen->area;value.iconCalibrated=false;error=L"Área salva.";
         } else {
             const auto& r=chosen->area;const auto& a=value.region;
-            if(r.x<a.x||r.y<a.y||r.x+r.width>a.x+a.width||r.y+r.height>a.y+a.height)
+            if(r.x<a.x||r.y<a.y||r.x+r.width>a.x+a.width||r.y+r.height>a.y+a.height||!a.contains(r.x+r.width/2.0,r.y+r.height/2.0))
                 throw std::runtime_error("Selecione um ícone inteiro dentro da área escolhida.");
             value.iconSize=r.width;value.iconCalibrated=true;error=L"Tamanho do ícone de status salvo para a busca nesta área.";
         }

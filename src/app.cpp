@@ -144,12 +144,12 @@ void App::start(){
     for(const auto& read:plan.readers)recognizers.push_back(makeRecognizer(read));
     for(const auto& action:plan.actions){
         if(showOverlayInCapture){
-            const auto padding=aa::overlayEffectPadding(action.rule.effect,action.target.width,action.target.height);
+            const auto padding=aa::overlayEffectPadding(action.rule.effect,action.target.width,action.target.height,action.target.shape);
             RECT destination=rect(action.target);InflateRect(&destination,padding,padding);
             for(const auto& reader:plan.readers){RECT overlap{},origin=rect(reader.area.region);if(IntersectRect(&overlap,&destination,&origin))throw std::runtime_error("No diagnóstico visual, a ação precisa ficar fora das regiões observadas.");}
         }
         auto overlay=std::make_unique<Overlay>();overlay->setCaptureVisible(showOverlayInCapture);overlay->initialize(instance);
-        overlay->setColor(action.rule.condition.color);overlay->setEffect(action.rule.effect);overlays.push_back(std::move(overlay));
+        overlay->setColor(action.rule.condition.color);overlay->setEffect(action.rule.effect);overlay->setShape(action.target.shape);overlays.push_back(std::move(overlay));
     }
     current.resize(plan.readers.size());lit.assign(plan.actions.size(),false);running=true;const auto runSource=++source;
     error.clear();page=0;makeUI();SetForegroundWindow(target);
@@ -160,7 +160,7 @@ void App::start(){
                 batch[i].source=runSource;batch[i].capturedMs=frame.capturedMs;
                 if(!frame.available)continue;
                 try{auto roi=plan.readers[i].area.region;roi.x-=plan.captureArea.x;roi.y-=plan.captureArea.y;
-                    batch[i].detection=recognizers[i]->recognize(aa::cropImage(frame.image,roi),plan.readers[i].area.iconSize);
+                    batch[i].detection=recognizers[i]->recognize(aa::cropImage(frame.image,roi),plan.readers[i].area.iconSize,roi.shape);
                 }catch(const std::exception& e){failure=widen(e.what());}
             }
             {std::lock_guard lock(mutex);latest=std::move(batch);latestSource=runSource;latestImage=std::move(frame.image);latestError=std::move(failure);}
@@ -199,7 +199,7 @@ void App::testAction(){
     if(destination==layout->areas.end()||!fits(destination->region,layout->clientWidth,layout->clientHeight))throw std::runtime_error("Selecione a área de destino desta regra na página HUDs.");
     previewTarget=destination->region;
     if(!testOverlay){testOverlay=std::make_unique<Overlay>();testOverlay->setCaptureVisible(showOverlayInCapture);testOverlay->initialize(instance);}
-    testOverlay->setColor(action->condition.color);testOverlay->setEffect(action->effect);
+    testOverlay->setColor(action->condition.color);testOverlay->setEffect(action->effect);testOverlay->setShape(previewTarget.shape);
     if(!badge){badge=CreateWindowExW(WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_NOACTIVATE|WS_EX_TOPMOST|WS_EX_TOOLWINDOW,L"STATIC",L"TESTE DA AÇÃO",WS_POPUP|SS_CENTER|SS_CENTERIMAGE,0,0,1,1,nullptr,nullptr,instance,nullptr);
         if(!badge)throw std::runtime_error("Não foi possível mostrar o aviso de teste.");
         theme::styleControl(badge,theme::Role::Badge);SetLayeredWindowAttributes(badge,0,245,LWA_ALPHA);}
@@ -235,13 +235,13 @@ void App::sampleActionColor(const std::function<aa::Image(HWND,RECT)>& captureFr
     }
     (void)applyActionColor(image);makeUI();
 }
-std::optional<PickedImage> App::pick(aa::SelectionKind kind,const aa::Recognizer* reference){
+std::optional<PickedImage> App::pick(aa::SelectionKind kind,const aa::Recognizer* reference,aa::RegionShape shape){
     if(selecting)return std::nullopt;stop();if((!target||!IsWindow(target))&&!connect())return std::nullopt;
     if(IsIconic(target))ShowWindow(target,SW_RESTORE);const auto before=screenOf(target);
     if(static_cast<std::int64_t>(before.width)*before.height>64000000)throw std::runtime_error("Use o jogo em um único monitor para selecionar.");
     CapturePanelGuard restore(*this);
         auto snapshot=captureOnce(target,{0,0,before.width,before.height});
-        auto chosen=aa::selectRegion(window,target,snapshot,before.origin,kind,reference);std::optional<PickedImage> result;
+        auto chosen=aa::selectRegion(window,target,snapshot,before.origin,kind,reference,shape);std::optional<PickedImage> result;
         if(chosen){const auto after=screenOf(target);
             if(after.width!=before.width||after.height!=before.height||after.dpi!=before.dpi||after.device!=before.device)throw std::runtime_error("A tela mudou durante a seleção. Tente novamente.");
             if(!fits(*chosen,before.width,before.height))throw std::runtime_error("A região selecionada está fora da janela.");

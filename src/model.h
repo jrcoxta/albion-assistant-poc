@@ -4,7 +4,21 @@
 #include <string>
 #include <vector>
 namespace aa {
-struct Region { int x=0,y=0,width=0,height=0; bool valid() const { return x>=0 && y>=0 && width>0 && height>0; } };
+enum class RegionShape { Rectangle = 0, Circle = 1 };
+struct Region {
+    int x=0,y=0,width=0,height=0;
+    RegionShape shape=RegionShape::Rectangle;
+    bool valid() const {
+        return x>=0 && y>=0 && width>0 && height>0 &&
+            (shape==RegionShape::Rectangle || (shape==RegionShape::Circle && width==height));
+    }
+    bool contains(double pointX,double pointY) const {
+        if(!valid() || pointX<x || pointY<y || pointX>=static_cast<double>(x)+width || pointY>=static_cast<double>(y)+height)return false;
+        if(shape==RegionShape::Rectangle)return true;
+        const double dx=(pointX-x-width/2.0)/(width/2.0),dy=(pointY-y-height/2.0)/(height/2.0);
+        return dx*dx+dy*dy<=1.0;
+    }
+};
 enum class Presence { Unknown, Absent, Present };
 enum class Condition { StacksEqual, Present, Absent };
 struct Detection { Presence presence=Presence::Unknown; std::optional<unsigned> stacks; float confidence=0; Region icon; std::string detail; };

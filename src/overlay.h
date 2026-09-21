@@ -14,6 +14,7 @@ public:
     void update(HWND target, RECT icon, bool highlight);
     void setColor(COLORREF color) { if (color_ != color) { color_ = color; drawn_ = false; } }
     void setEffect(aa::OverlayEffect effect) { if (effect_ != effect) { effect_ = effect; drawn_ = false; } }
+    void setShape(aa::RegionShape shape) { if (shape_ != shape) { shape_ = shape; drawn_ = false; } }
 private:
     HWND window_ = nullptr;
     HDC memoryDC_ = nullptr;
@@ -23,6 +24,7 @@ private:
     bool drawn_ = false;
     bool captureVisible_ = false;
     aa::OverlayEffect effect_ = aa::OverlayEffect::Border;
+    aa::RegionShape shape_ = aa::RegionShape::Rectangle;
     COLORREF color_ = RGB(255, 191, 0);
     POINT source_{};
     SIZE size_{};

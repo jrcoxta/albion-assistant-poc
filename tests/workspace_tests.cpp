@@ -151,6 +151,33 @@ void roundtripAndIsolation() {
           "ultima HUD e set nao ressuscitam com legado presente ao reiniciar");
     check(aa::newId(loaded) != w.huds[0].id, "contador de IDs persiste apos exclusoes");
 }
+void shapeCompatibility() {
+    TemporaryDirectory directory;
+    const auto file = directory.path / L"workspace.ini";
+    aa::saveWorkspace(file, populated(directory.path));
+    ini(file, L"hud.0.area.1", L"shape", L"1");
+    const auto loaded = aa::loadWorkspace(file, {});
+    check(loaded.huds[0].areas[1].region.shape == aa::RegionShape::Circle, "formato circular nao carregou");
+    aa::saveWorkspace(file, loaded);
+    const auto roundtrip = aa::loadWorkspace(file, {});
+    check(roundtrip.huds[0].areas[1].region.shape == aa::RegionShape::Circle && roundtrip.sets[0].rules[0].id == loaded.sets[0].rules[0].id &&
+          roundtrip.statuses[1].stacks[0].path == loaded.statuses[1].stacks[0].path, "circulo perdeu forma, regra ou amostra ao reabrir");
+    ini(file, L"hud.0.area.1", L"shape", nullptr);
+    check(aa::loadWorkspace(file, {}).huds[0].areas[1].region.shape == aa::RegionShape::Rectangle, "area legada nao assumiu retangulo");
+    for (const auto value : {L"2", L"-1", L"", L"x"}) {
+        ini(file, L"hud.0.area.1", L"shape", value);const auto intact = bytes(file);
+        rejected([&] { (void)aa::loadWorkspace(file, {}); }, "formato invalido foi aceito");
+        check(bytes(file) == intact, "formato invalido sobrescreveu arquivo salvo");
+    }
+    aa::saveWorkspace(file, loaded);const auto intact = bytes(file);
+    auto invalid = loaded;invalid.huds[0].areas[1].region.height = 61;
+    rejected([&] { aa::saveWorkspace(file, invalid); }, "circulo nao quadrado foi gravado");
+    check(bytes(file) == intact, "circulo invalido sobrescreveu arquivo");
+    invalid = loaded;invalid.huds[0].areas[1].region = {0,0,0,0,static_cast<aa::RegionShape>(5)};
+    rejected([&] { aa::saveWorkspace(file, invalid); }, "rascunho com formato invalido foi gravado");
+    ini(file, L"hud.0.area.1", L"height", L"61");
+    rejected([&] { (void)aa::loadWorkspace(file, {}); }, "circulo nao quadrado foi lido");
+}
 void effectCompatibility() {
     TemporaryDirectory directory;
     const auto file = directory.path / L"workspace.ini";
@@ -349,7 +376,7 @@ void readiness() {
 }
 }
 int main() {
-    try { temporaryIsolation(); roundtripAndIsolation(); effectCompatibility(); invalidData(); migration(); readiness(); }
+    try { temporaryIsolation(); roundtripAndIsolation(); shapeCompatibility(); effectCompatibility(); invalidData(); migration(); readiness(); }
     catch (const std::exception& error) { std::cerr << "FALHOU: " << error.what() << '\n'; return 1; }
     std::cout << checks << " verificacoes de workspace, 0 falhas\n";
     return 0;

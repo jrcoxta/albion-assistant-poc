@@ -100,7 +100,8 @@ struct App {
     void testAction();
     void sampleActionColor(const std::function<aa::Image(HWND,RECT)>& captureFrame={});
     bool applyActionColor(const aa::Image& image);
-    std::optional<PickedImage> pick(aa::SelectionKind kind, const aa::Recognizer* reference=nullptr);
+    std::optional<PickedImage> pick(aa::SelectionKind kind, const aa::Recognizer* reference=nullptr,
+                                  aa::RegionShape shape=aa::RegionShape::Rectangle);
     // Grava referência nova sob nome único. Retorna caminho; chamador faz commit do status.
     std::wstring storeImage(const std::wstring& statusId,const aa::Image& image);
 };
