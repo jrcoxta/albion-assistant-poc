@@ -152,6 +152,19 @@ void checkRadialClock(const std::filesystem::path& assets) {
     check(!real.recognize(last,64).remainingFraction,"Referencia de outro status nao produz relogio");
     const auto nativeFrames=assets.parent_path()/"tests"/"fixtures"/"recognition-clock";
     check(real.setClockReference(aa::loadImage(assets/"assassin-clock-40.png")),"Referencia nativa40 aceita");
+    // Na grade real de 40 px, algumas frentes oferecem apenas quatro pixels
+    // de um lado. Todos concordam com a sombra; não é oclusão do contador.
+    for(const auto* file:{"162-77563185.png","163-77563227.png","228-77565170.png",
+            "229-77565180.png","230-77565217.png","298-77567180.png","299-77567217.png",
+            "368-77569217.png","434-77571326.png","441-77571625.png"}) {
+        const auto measured=real.recognizeNearSize(aa::loadImage(nativeFrames/file),38);
+        check(measured.stacks==3u&&measured.remainingFraction.has_value(),
+              "Frente visivel com todos os quatro pixels corretos nao deve apagar o aro");
+        const std::string name=file;
+        const float expected=name.starts_with("434-")?.50f:name.starts_with("441-")?.47f:.78f;
+        check(std::abs(*measured.remainingFraction-expected)<.04f,
+              "Suporte da grade pequena deve preservar o angulo visivel do relogio");
+    }
     for(const auto& sample:{ClockCase{"120-77561887.png",.92f,.97f},
             ClockCase{"150-77562806.png",.79f,.88f},ClockCase{"170-77563387.png",.72f,.81f},
             ClockCase{"260-77565977.png",.88f,.96f},ClockCase{"440-77571591.png",.44f,.52f},

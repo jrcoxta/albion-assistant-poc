@@ -51,3 +51,17 @@ cobertura temporal completa: disco inteiramente iluminado, frente encoberta
 pelo contador e suporte visual insuficiente continuam desconhecidos. O
 estimador radial e seus limiares não foram relaxados. O destaque por stacks
 não depende da disponibilidade da fração do relógio.
+
+## Quedas evitáveis na grade pequena
+
+Os frames 162–163, 228–230, 298–299, 368, 434 e 441 foram adicionados
+como cópias literais da mesma sequência. Todos mantêm 3 stacks e uma
+frente visível. Em um dos lados dessa frente há somente quatro pixels
+disponíveis na janela angular, e todos os quatro concordam com a sombra;
+o requisito fixo de cinco apagava indevidamente o aro. A regressão exige
+fração e concordância com o ângulo visível (aproximadamente 77–78°, 179°
+ou 192°). A correção exige quatro quando só há quatro disponíveis e
+mantém cinco quando a grade oferece cinco ou mais. Menos de quatro não
+é evidência suficiente. Máscara, contraste, ambiguidade e presença continuam
+com os mesmos critérios. Isso não resolve a frente encoberta pelo número
+nem o disco sem contraste logo depois de uma renovação.

@@ -1,6 +1,18 @@
 # Validação do Albion Assistant
 
-## Entrega atual: cadastro direto e reconhecimento da HUD pequena
+## Correção atual: evidência impossível na grade do relógio
+
+Base `35803d5`, 21/09/2026. O usuário relatou que o timer some embora o contador do buff continue. O diagnóstico independente `/root/timer_diagnosis` reproduziu exatamente os resultados de 361 frames com 3 stacks: 250 com fração, 111 sem ela. Desses 111, dez falhavam somente porque a janela angular oferecia quatro pixels corretos e o código exigia cinco; 66 tinham ambiguidade angular e 35 não tinham contraste temporal. A reprodução usa PNGs locais, sem rede, portanto o ping não explica essas perdas.
+
+Critério da correção: aceitar os quatro pixels corretos quando somente quatro existem; manter exigência de cinco se há cinco ou mais; menos de quatro, oclusão, ausência de contraste e referência inválida continuam sem fração. Presença/stacks/aura e configuração não mudam. A máscara não foi ampliada: o ganho observado com outra máscara dependia da localização do contador deste exemplo e ainda não estava validado para outros ícones.
+
+- **APROVADO — reprodução e regressão:** teste com dez capturas literais falhou antes da mudança em `Frente visivel com todos os quatro pixels corretos nao deve apagar o aro`. Após ajustar apenas o suporte disponível, todos os testes de reconhecimento passaram, inclusive negativos anteriores. A regressão também verifica o ângulo visível, não apenas a existência de uma fração. Proveniência em `tests/fixtures/recognition-clock/README.md`; diagnóstico em `build/logs/timer-diagnosis/`.
+- **APROVADO — revisão independente:** `/root/timer_fix_review` conferiu código/arquitetura e regressões, sem bloqueantes. Probe isolado confirmou 4/4 aceito, 4/5 e 3/4 rejeitados, além de suporte válido com cinco ou mais. Evidência: `build/logs/timer-review/result.txt`. Máscara, contraste, ambiguidade, fração e aura permanecem independentes deste ajuste.
+- **APROVADO — build e publicação:** build canônico Release concluiu em 21/09/2026 às 12:29 (Brasília), com 14/14 testes aprovados. Único `dist/AlbionAssistant.exe`, SHA-256 `958EDC3493CF72F567B6C410AB89D5CF6D93C0C332B0FBA508B3663AFF479B63`, conferido contra `build/logs/Release-validation.json`. Configuração real preservada, SHA-256 `F370D7031B97F6C8D1CA2201DF90513B3F79DA83DDAD8672C82215A910A4CC81`. Nenhuma alteração no antivírus.
+- **PENDENTE — continuidade visual no jogo:** a regressão reproduz capturas reais, mas não representa aprovação de um novo ciclo visual completo no jogo.
+- **Limitação mantida:** esta correção remove as dez perdas evitáveis identificadas, não oferece timer contínuo através de oclusões/renovações sem contraste. A escolha entre estimativa identificada e indicação de tempo indisponível foi apresentada ao usuário; nenhuma extrapolação foi incluída silenciosamente.
+
+## Entrega anterior: cadastro direto e reconhecimento da HUD pequena
 
 Base Git `e146969`, em 21/09/2026. Autores: coordenador `/root` (cadastros, integração e build) e `/root/vision_finish` (reconhecimento, recursos e fixtures). Critérios: Novo → nome → Criar nos cinco cadastros; cancelar mantém rascunho e seleção; erros não criam itens; salvar atualiza listas; 3 stacks reconhecidos mantêm destaque, negativos apagam; relógio usa somente evidência visual; uma distribuição, dados preservados.
 

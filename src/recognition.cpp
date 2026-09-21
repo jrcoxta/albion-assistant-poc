@@ -121,17 +121,20 @@ std::optional<float> radialRemaining(const Image& image,Region icon,const Image&
     // A grade de pixels pode dar o mesmo ajuste para vários graus. Usar o
     // centro da faixa evita favorecer sua primeira extremidade, sobretudo em40px.
     bestAngle=(first+last)/2;
-    int startTotal=0,startDark=0,endTotal=0,endLight=0,before=0,after=0;
+    int startTotal=0,startDark=0,endTotal=0,endLight=0,before=0,after=0,beforeTotal=0,afterTotal=0;
     for(std::size_t i=0;i<points.size();++i) {
         const float angle=points[i].angle,shade=(light-ratios[i])/contrast;
         if(angle>3 && angle<12) { ++startTotal; startDark+=shade>.55f; }
         if(angle>348 && angle<357) { ++endTotal; endLight+=shade<.35f; }
-        if(angle>bestAngle-8 && angle<bestAngle-2 && shade>.65f) ++before;
-        if(angle>bestAngle+2 && angle<bestAngle+8 && shade<.35f) ++after;
+        if(angle>bestAngle-8 && angle<bestAngle-2) { ++beforeTotal; before+=shade>.65f; }
+        if(angle>bestAngle+2 && angle<bestAngle+8) { ++afterTotal; after+=shade<.35f; }
     }
     // Exigir a origem escura no topo e suporte observado dos dois lados evita
     // tratar uma referência parcialmente escura ou o contador como a frente.
-    if(startTotal<4 || endTotal<4 || startDark<startTotal*.75f || endLight<endTotal*.75f || before<5 || after<5) return {};
+    // Em 40 px certas janelas angulares contêm só quatro pixels. Exigir os
+    // quatro corretos nesses casos, mantendo cinco quando a grade os oferece.
+    if(startTotal<4 || endTotal<4 || startDark<startTotal*.75f || endLight<endTotal*.75f ||
+       beforeTotal<4 || afterTotal<4 || before<std::min(5,beforeTotal) || after<std::min(5,afterTotal)) return {};
     return 1.f-bestAngle/360.f;
 }
 }
