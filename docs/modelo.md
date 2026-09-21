@@ -2,13 +2,17 @@
 
 ## Contrato do produto
 
-HUD configura o computador: resolução, DPI, monitor e regiões nomeadas, com escala do ícone nas regiões de leitura. Status são uma biblioteca compartilhada de buffs/debuffs com ID estável, nome, referência e amostras rotuladas de stacks. Sets possuem listas de regras: status + região de origem + presença/ausência/stacks + borda/brilho/cor + região de destino.
+HUD configura o computador: resolução, DPI, monitor e regiões nomeadas, com escala do ícone nas regiões de leitura. Status são uma biblioteca compartilhada de buffs/debuffs com ID estável, nome, referência e amostras rotuladas de stacks. Sets possuem listas de regras: status + região de origem + presença/ausência/stacks + efeito/cor + região de destino.
 
 Uma HUD não carrega nem apaga regras. Um set não muda coordenadas. Regiões com o mesmo nome em HUDs diferentes permitem reutilizar o mesmo set. Nomes de regiões são únicos na HUD; nomes de entidades são únicos em sua categoria. Referências entre regras e status usam IDs. Regra sem dependência/calibração válida bloqueia início com explicação. O primeiro destaque verdadeiro da lista vence quando duas regras usam o mesmo destino.
 
 Condição de stacks oferece somente valores cadastrados para aquele status. Contador ilegível permanece desconhecido. Presença/ausência não exige amostras de stacks. O preset existente de Espírito Assassino é preservado pela migração, mas não define os rótulos da interface nem as opções dos outros status.
 
 ## Persistência e migração
+
+O efeito pertence à regra: Borda, Brilho, Pulso ou Halo. A região de destino define o espaço transparente da habilidade; a margem externa respeita a janela cliente. A opção Cor da habilidade captura somente o destino uma vez, após salvar o editor, e guarda a cor predominante encontrada. Não altera a origem de leitura nem exige nova medição de ícone. Falhas e imagens sem evidência cromática preservam a cor existente.
+
+O campo opcional `effect` de schema 1 tem valores 0–3. Se ausente, `glow=0/1` é lido como Borda/Brilho. Se presente e válido, prevalece; o campo legado também é validado. Gravações novas incluem ambos os campos. Binários antigos com parser estrito não leem o novo campo: esta compatibilidade é de atualização, sem promessa de downgrade.
 
 `workspace.ini` em AppData guarda as três coleções, gravado atomicamente com schema explícito. Os arquivos legados permanecem intactos. Na primeira abertura, importar a configuração ativa e HUDs anteriores, preservando regras divergentes em sets distintos. Contadores 2/3 usados implicitamente pelo legado tornam-se amostras explícitas dos status personalizados importados; novos cadastros não recebem essas amostras. A existência do arquivo novo impede reimportação, inclusive depois de excluir todas as HUDs. `--settings` continua isolando dados de teste na pasta escolhida.
 
@@ -17,7 +21,7 @@ Condição de stacks oferece somente valores cadastrados para aquele status. Con
 1. Criar, salvar, selecionar e excluir HUDs, inclusive a última, sem alterar status/sets ou ressuscitá-la após reiniciar.
 2. Mesmo set em duas HUDs com coordenadas distintas; troca de set preserva HUD, troca de HUD preserva set.
 3. Biblioteca genérica com captura de referência e amostras de stacks; condições presença, ausência e stacks cadastrados.
-4. Duas ou mais regras/status simultâneos com observações independentes; parar/expirar/fonte inválida apaga ações. Borda e brilho configuráveis, com teste visual separado da leitura.
+4. Duas ou mais regras/status simultâneos com observações independentes; parar/expirar/fonte inválida apaga ações. Borda, brilho, pulso e halo configuráveis, com teste visual separado da leitura.
 5. Configuração anterior migrada sem sobrescrita; um único EXE; revisores independentes e limites de validação documentados.
 
 ## Implementação

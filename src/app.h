@@ -24,7 +24,7 @@ enum Id {
     SampleValue, CaptureStack, StackList, DeleteStack, AddPreset,
     SetList, SetName, NewSet, DeleteSet, RuleList, RuleName, NewRule, DeleteRule,
     RuleStatus, SourceArea, TargetArea, ConditionBox, Stacks, EffectBox, Color, Enabled,
-    MoveRuleUp, MoveRuleDown, Validity, Tab0=250
+    MoveRuleUp, MoveRuleDown, Validity, SampleColor, Tab0=250
 };
 std::wstring widen(const std::string& value);
 std::wstring text(HWND window);
@@ -98,6 +98,8 @@ struct App {
     void consume();
     void updateHighlight();
     void testAction();
+    void sampleActionColor(const std::function<aa::Image(HWND,RECT)>& captureFrame={});
+    bool applyActionColor(const aa::Image& image);
     std::optional<PickedImage> pick(aa::SelectionKind kind, const aa::Recognizer* reference=nullptr);
     // Grava referência nova sob nome único. Retorna caminho; chamador faz commit do status.
     std::wstring storeImage(const std::wstring& statusId,const aa::Image& image);

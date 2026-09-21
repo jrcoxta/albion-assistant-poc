@@ -1,5 +1,6 @@
 // Exercita somente janelas e arquivos do próprio teste; não interage com o jogo.
 #include "app.h"
+#include "theme.h"
 #include <objbase.h>
 #include "../resources/resource.h"
 #include <algorithm>
@@ -9,6 +10,8 @@
 
 using namespace aaapp;
 namespace {
+bool forceRebuildPaint=false;
+int intermediatePaints=0;
 void require(bool value,const char* message){if(!value)throw std::runtime_error(message);}
 struct TestApp:App {
     ~TestApp(){
@@ -22,7 +25,8 @@ struct TestApp:App {
 LRESULT CALLBACK testProc(HWND window,UINT message,WPARAM wp,LPARAM lp){
     auto* app=reinterpret_cast<App*>(GetWindowLongPtrW(window,GWLP_USERDATA));
     if(message==WM_NCCREATE){app=static_cast<App*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);SetWindowLongPtrW(window,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(app));}
-    if(message==WM_PAINT&&app){app->paint();return 0;}
+    if(message==WM_PARENTNOTIFY&&app&&app->rebuilding&&forceRebuildPaint)UpdateWindow(window);
+    if(message==WM_PAINT&&app){if(app->rebuilding)++intermediatePaints;app->paint();return 0;}
     return DefWindowProcW(window,message,wp,lp);
 }
 void tab(App& app,int page){app.command(Tab0+page,BN_CLICKED);require(app.page==page,"navegação não mudou de página");}
@@ -85,6 +89,30 @@ int wmain(int argc,wchar_t** argv){
         app.window=CreateWindowExW(0,cls.lpszClassName,L"Validação do painel",WS_OVERLAPPED|WS_CAPTION,20,20,880,740,nullptr,nullptr,app.instance,&app);
         app.target=CreateWindowExW(0,L"STATIC",L"Alvo do teste",WS_POPUP,0,0,800,600,nullptr,nullptr,app.instance,nullptr);
         require(app.window&&app.target,"janelas de teste não criadas");app.makeUI();
+        require(!IsWindowVisible(app.window)&&!app.rebuilding,"construção mostrou janela originalmente oculta ou deixou bloqueio ativo");
+        {
+            const auto start=app.item(Start);const auto source=app.source;
+            app.running=true;tab(app,0);choose(app,HudList,0);choose(app,SetList,0);
+            require(app.item(Start)==start&&app.running&&app.source==source,"seleção já ativa reconstruiu painel ou interrompeu leitura");
+            app.running=false;
+            ShowWindow(app.window,SW_SHOWNOACTIVATE);
+            SetActiveWindow(app.window);
+            SetFocus(app.item(Validity));SetWindowTextW(app.item(Validity),L"731");SendMessageW(app.item(Validity),EM_SETSEL,1,2);
+            if(GetFocus()!=app.item(Validity))std::cerr<<"initial focus: enabled="<<IsWindowEnabled(app.item(Validity))<<" visible="<<IsWindowVisible(app.item(Validity))<<" parent="<<IsWindowVisible(app.window)<<" error="<<GetLastError()<<'\n';
+            require(GetFocus()==app.item(Validity),"teste não conseguiu estabelecer foco antes da reconstrução");
+            forceRebuildPaint=true;app.rebuildUIWithDraft();forceRebuildPaint=false;
+            require(intermediatePaints==0,"reconstrução expôs pintura intermediária do painel");
+            DWORD begin=0,end=0;SendMessageW(app.item(Validity),EM_GETSEL,reinterpret_cast<WPARAM>(&begin),reinterpret_cast<LPARAM>(&end));
+            if(!IsWindowVisible(app.window)||GetFocus()!=app.item(Validity)||text(app.item(Validity))!=L"731"||begin!=1||end!=2)
+                std::cerr<<"rebuild: visible="<<IsWindowVisible(app.window)<<" focus="<<(GetFocus()==app.item(Validity))<<" draft="<<(text(app.item(Validity))==L"731")<<" selection="<<begin<<","<<end<<'\n';
+            require(IsWindowVisible(app.window)&&GetFocus()==app.item(Validity)&&text(app.item(Validity))==L"731"&&begin==1&&end==2,
+                    "reconstrução perdeu visibilidade, foco, rascunho ou cursor");
+            SetWindowTextW(app.item(Validity),L"750");
+            try{theme::RedrawLock redraw(app.window);throw std::runtime_error("falha controlada");}catch(const std::exception&){}
+            require(IsWindowVisible(app.window)&&!GetPropW(app.window,L"Albion.Theme.Redraw")&&!GetPropW(app.window,L"SysSetRedraw"),
+                    "exceção deixou pintura bloqueada");
+            ShowWindow(app.window,SW_HIDE);app.rebuildUIWithDraft();require(!IsWindowVisible(app.window),"restauração de rascunho exibiu painel oculto");
+        }
         const auto pictures=argc>1?std::filesystem::absolute(argv[1]):std::filesystem::path{};
         require(app.item(Start)&&!app.item(RuleName)&&!app.item(StatusName)&&!app.item(AreaName),"Monitor mistura editores");
         screenshot(app,pictures,L"ui-monitor.png");
@@ -165,6 +193,51 @@ int wmain(int argc,wchar_t** argv){
         require(app.item(RuleName)&&!app.item(StatusName)&&!app.item(HudName),"Regras misturam outros editores");
         require(SendMessageW(app.item(ConditionBox),CB_GETCURSEL,0,0)==2&&text(app.item(Stacks))==L"3","condição ou stack incorreto na edição");
         screenshot(app,pictures,L"ui-regras.png");
+        require(SendMessageW(app.item(EffectBox),CB_GETCOUNT,0,0)==4&&app.item(SampleColor),"efeitos e captura de cor ausentes");
+        {
+            ShowWindow(app.window,SW_SHOWNOACTIVATE);SetActiveWindow(app.window);
+            const auto checkbox=app.item(Enabled);SetFocus(checkbox);const auto checked=SendMessageW(checkbox,BM_GETCHECK,0,0);
+            SendMessageW(checkbox,WM_KEYDOWN,VK_SPACE,0);SendMessageW(checkbox,WM_KEYUP,VK_SPACE,0);
+            require(SendMessageW(checkbox,BM_GETCHECK,0,0)!=checked,"checkbox com tema não responde ao Espaço");
+            SendMessageW(checkbox,WM_KEYDOWN,VK_SPACE,0);SendMessageW(checkbox,WM_KEYUP,VK_SPACE,0);
+            const auto combo=app.item(EffectBox);SetFocus(combo);SendMessageW(combo,CB_SETCURSEL,0,0);
+            SendMessageW(combo,CB_SHOWDROPDOWN,TRUE,0);SendMessageW(combo,WM_KEYDOWN,VK_DOWN,0);SendMessageW(combo,WM_KEYDOWN,VK_RETURN,0);
+            require(SendMessageW(combo,CB_GETCURSEL,0,0)==1&&!SendMessageW(combo,CB_GETDROPPEDSTATE,0,0),"combo com tema não aceita escolha pelo teclado");
+            ShowWindow(app.window,SW_HIDE);
+        }
+        for(int effect=0;effect<4;++effect){choose(app,EffectBox,effect);app.saveEditor();require(static_cast<int>(aa::loadWorkspace(app.workspacePath,{}).sets[0].rules[0].effect)==effect,"efeito da interface não persiste");}
+        {
+            const auto before=app.workspace;
+            aa::Image colored{64,64,std::vector<std::uint8_t>(64*64*4,255)};
+            for(std::size_t i=0;i<colored.bgra.size();i+=4){colored.bgra[i]=30;colored.bgra[i+1]=50;colored.bgra[i+2]=220;}
+            require(app.applyActionColor(colored),"cor vermelha válida não foi aplicada");
+            const auto capturedColor=app.rule()->condition.color;
+            require(GetRValue(capturedColor)>GetBValue(capturedColor)&&
+                    aa::loadWorkspace(app.workspacePath,{}).sets[0].rules[0].condition.color==capturedColor,
+                    "cor capturada inverteu canais ou não foi salva");
+            app.makeUI();app.saveEditor();require(app.rule()->condition.color==capturedColor,"editor substituiu cor capturada pela paleta");
+            require(!app.applyActionColor({})&&app.rule()->condition.color==capturedColor,"imagem inválida apagou cor salva");
+            std::fill(colored.bgra.begin(),colored.bgra.end(),std::uint8_t{100});
+            require(!app.applyActionColor(colored)&&aa::loadWorkspace(app.workspacePath,{}).sets[0].rules[0].condition.color==capturedColor,
+                    "imagem neutra alterou cor salva");
+            app.hud()->areas.push_back({L"Habilidade Q",{410,420,70,50},48,false});app.makeUI();
+            choose(app,TargetArea,2);ShowWindow(app.window,SW_SHOWNOACTIVATE);
+            bool enteredCapture=false,captureFailed=false;
+            try{app.sampleActionColor([&](HWND target,RECT region)->aa::Image{
+                enteredCapture=true;const RECT expected{410,420,480,470};
+                require(target==app.target&&EqualRect(&region,&expected),"captura de cor não usa o destino recém-selecionado");
+                require(app.selecting&&!IsWindowVisible(app.window)&&!app.running,"captura não ocultou painel e pausou leitura");
+                throw std::runtime_error("captura indisponível simulada");
+            });}catch(const std::exception& failure){captureFailed=std::string(failure.what())=="captura indisponível simulada";}
+            require(enteredCapture&&captureFailed&&!app.selecting&&IsWindowVisible(app.window)&&app.rule()->condition.color==capturedColor,
+                    "falha após ocultar painel não restaurou janela ou cor anterior");
+            require(app.rule()->targetArea==L"Habilidade Q"&&app.plan.captureArea.width==0,"captura pontual ampliou captura contínua ou perdeu destino salvo");
+            ShowWindow(app.window,SW_HIDE);
+            app.hud()->clientWidth=900;bool failed=false;
+            try{app.sampleActionColor();}catch(const std::exception&){failed=true;}
+            require(failed&&!app.selecting&&app.rule()->condition.color==capturedColor,"tela incompatível capturou ou perdeu cor anterior");
+            app.commit(before);app.makeUI();
+        }
         choose(app,RuleStatus,1);require(SendMessageW(app.item(Stacks),CB_GETCOUNT,0,0)==0,"status personalizado herdou contadores do exemplo");
         tab(app,2);require(app.set()->rules[0].statusId==L"s2"&&app.set()->rules[0].condition.stacks==3,"rascunho sem amostra impediu navegação ou mudou valor");
         require(!aa::readinessIssues(app.workspace).empty(),"regra sem referência ficou pronta");
@@ -209,7 +282,7 @@ int wmain(int argc,wchar_t** argv){
             observations=observe();require(aa::evaluateMonitor(plan,observations,1000,750,11)==std::vector<bool>({false,true}),"retirar um status interferiu na leitura do outro");
         }
         tab(app,3);require(SendMessageW(app.item(Stacks),CB_GETCOUNT,0,0)==1&&SendMessageW(app.item(Stacks),CB_GETCURSEL,0,0)==CB_ERR,"amostra nova substituiu valor salvo silenciosamente");
-        choose(app,Stacks,0);choose(app,EffectBox,1);app.saveEditor();require(app.rule()->condition.stacks==5&&app.rule()->glow,"regra não salvou contador genérico e brilho");
+        choose(app,Stacks,0);choose(app,EffectBox,1);app.saveEditor();require(app.rule()->condition.stacks==5&&app.rule()->effect==aa::OverlayEffect::Glow,"regra não salvou contador genérico e brilho");
         choose(app,ConditionBox,0);app.saveEditor();require(app.rule()->condition.condition==aa::Condition::Present&&!IsWindowEnabled(app.item(Stacks)),"presença usa contador");
         choose(app,ConditionBox,1);app.saveEditor();require(app.rule()->condition.condition==aa::Condition::Absent,"ausência mapeada incorretamente");
         app.command(NewRule,BN_CLICKED);app.command(NewRule,BN_CLICKED);require(app.set()->rules.size()==3&&app.set()->rules[1].condition.name!=app.set()->rules[2].condition.name,"novas regras colidem");

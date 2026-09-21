@@ -1,4 +1,5 @@
 #pragma once
+#include "overlay_effect.h"
 #include "model.h"
 #include <filesystem>
 
@@ -28,7 +29,7 @@ struct StatusRule {
     std::wstring id, statusId;
     std::wstring sourceArea, targetArea;
     Rule condition;
-    bool glow = false;
+    OverlayEffect effect = OverlayEffect::Border;
 };
 struct SetProfile { std::wstring id, name; std::vector<StatusRule> rules; };
 struct Workspace {

@@ -1,5 +1,6 @@
 #include "app.h"
 #include "calibration.h"
+#include "theme.h"
 #include "../resources/resource.h"
 #include <shlobj.h>
 #include <algorithm>
@@ -8,6 +9,34 @@
 #include <stdexcept>
 
 namespace aaapp {
+namespace {
+aa::Image captureOnce(HWND target, RECT region){
+    std::mutex mutex;std::condition_variable arrived;aa::Image snapshot;std::string failure;
+    const auto requested=static_cast<std::int64_t>(GetTickCount64());aa::DesktopCapture single;
+    single.start(target,region,[&](aa::CaptureFrame frame){
+        std::lock_guard lock(mutex);
+        if(frame.available&&frame.capturedMs>=requested&&!snapshot.valid()){
+            snapshot=std::move(frame.image);arrived.notify_one();
+        }else if(!frame.error.empty())failure=frame.error;
+    });
+    {std::unique_lock lock(mutex);arrived.wait_for(lock,std::chrono::milliseconds(3000),[&]{return snapshot.valid();});}
+    single.stop();
+    if(!snapshot.valid())throw std::runtime_error("Não consegui capturar o jogo. Volte ao Albion e tente novamente. "+failure);
+    return snapshot;
+}
+class CapturePanelGuard {
+public:
+    explicit CapturePanelGuard(App& app):app_(app),visible_(IsWindowVisible(app.window)!=FALSE){
+        app_.selecting=true;ShowWindow(app_.window,SW_HIDE);SetForegroundWindow(app_.target);
+    }
+    ~CapturePanelGuard(){
+        app_.selecting=false;
+        if(visible_){ShowWindow(app_.window,SW_SHOW);SetForegroundWindow(app_.window);}
+    }
+private:
+    App& app_;bool visible_;
+};
+}
 std::wstring widen(const std::string& value){
     if(value.empty())return {};
     const int size=MultiByteToWideChar(CP_UTF8,0,value.data(),static_cast<int>(value.size()),nullptr,0);
@@ -115,11 +144,12 @@ void App::start(){
     for(const auto& read:plan.readers)recognizers.push_back(makeRecognizer(read));
     for(const auto& action:plan.actions){
         if(showOverlayInCapture){
-            RECT destination=rect(action.target);InflateRect(&destination,12,12);
+            const auto padding=aa::overlayEffectPadding(action.rule.effect,action.target.width,action.target.height);
+            RECT destination=rect(action.target);InflateRect(&destination,padding,padding);
             for(const auto& reader:plan.readers){RECT overlap{},origin=rect(reader.area.region);if(IntersectRect(&overlap,&destination,&origin))throw std::runtime_error("No diagnóstico visual, a ação precisa ficar fora das regiões observadas.");}
         }
         auto overlay=std::make_unique<Overlay>();overlay->setCaptureVisible(showOverlayInCapture);overlay->initialize(instance);
-        overlay->setColor(action.rule.condition.color);overlay->setGlow(action.rule.glow);overlays.push_back(std::move(overlay));
+        overlay->setColor(action.rule.condition.color);overlay->setEffect(action.rule.effect);overlays.push_back(std::move(overlay));
     }
     current.resize(plan.readers.size());lit.assign(plan.actions.size(),false);running=true;const auto runSource=++source;
     error.clear();page=0;makeUI();SetForegroundWindow(target);
@@ -169,31 +199,54 @@ void App::testAction(){
     if(destination==layout->areas.end()||!fits(destination->region,layout->clientWidth,layout->clientHeight))throw std::runtime_error("Selecione a área de destino desta regra na página HUDs.");
     previewTarget=destination->region;
     if(!testOverlay){testOverlay=std::make_unique<Overlay>();testOverlay->setCaptureVisible(showOverlayInCapture);testOverlay->initialize(instance);}
-    testOverlay->setColor(action->condition.color);testOverlay->setGlow(action->glow);
+    testOverlay->setColor(action->condition.color);testOverlay->setEffect(action->effect);
     if(!badge){badge=CreateWindowExW(WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_NOACTIVATE|WS_EX_TOPMOST|WS_EX_TOOLWINDOW,L"STATIC",L"TESTE DA AÇÃO",WS_POPUP|SS_CENTER|SS_CENTERIMAGE,0,0,1,1,nullptr,nullptr,instance,nullptr);
-        if(!badge)throw std::runtime_error("Não foi possível mostrar o aviso de teste.");SetLayeredWindowAttributes(badge,0,245,LWA_ALPHA);}
+        if(!badge)throw std::runtime_error("Não foi possível mostrar o aviso de teste.");
+        theme::styleControl(badge,theme::Role::Badge);SetLayeredWindowAttributes(badge,0,245,LWA_ALPHA);}
     SendMessageW(badge,WM_SETFONT,reinterpret_cast<WPARAM>(font),TRUE);previewUntil=GetTickCount64()+5000;SetForegroundWindow(target);updateHighlight();refreshStatus();
+}
+bool App::applyActionColor(const aa::Image& image){
+    if(!rule())throw std::runtime_error("Escolha uma regra para capturar a cor da habilidade.");
+    const auto color=aa::skillAccentColor(image);
+    if(!color){error=L"Não encontrei uma cor nítida. A cor atual foi mantida.";return false;}
+    auto changed=workspace;
+    for(auto& profile:changed.sets)if(profile.id==workspace.activeSetId)
+        profile.rules.at(static_cast<std::size_t>(selectedRule)).condition.color=*color;
+    commit(std::move(changed));error=L"Cor capturada e salva. Capture novamente para atualizar.";return true;
+}
+void App::sampleActionColor(const std::function<aa::Image(HWND,RECT)>& captureFrame){
+    if(selecting)return;
+    saveEditor();stop();
+    if((!target||!IsWindow(target))&&!connect())return;
+    if(IsIconic(target))ShowWindow(target,SW_RESTORE);
+    const auto* action=rule();const auto* layout=hud();
+    if(!action||!layout||!geometryMatches())throw std::runtime_error("Escolha uma regra e uma HUD compatível com esta tela para capturar a cor.");
+    const auto destination=std::find_if(layout->areas.begin(),layout->areas.end(),[&](const auto& area){return aa::sameName(area.name,action->targetArea);});
+    if(destination==layout->areas.end()||!fits(destination->region,layout->clientWidth,layout->clientHeight))
+        throw std::runtime_error("Selecione a área de destino desta regra na página HUDs.");
+    if(static_cast<std::int64_t>(destination->region.width)*destination->region.height>64000000)
+        throw std::runtime_error("Selecione somente a área da habilidade para capturar a cor.");
+    aa::Image image;
+    {
+        CapturePanelGuard restore(*this);
+        image=captureFrame?captureFrame(target,rect(destination->region)):captureOnce(target,rect(destination->region));
+        if(!geometryMatches()||GetForegroundWindow()!=target)
+            throw std::runtime_error("A tela ou a janela ativa mudou durante a captura. A cor anterior foi mantida.");
+    }
+    (void)applyActionColor(image);makeUI();
 }
 std::optional<PickedImage> App::pick(aa::SelectionKind kind,const aa::Recognizer* reference){
     if(selecting)return std::nullopt;stop();if((!target||!IsWindow(target))&&!connect())return std::nullopt;
     if(IsIconic(target))ShowWindow(target,SW_RESTORE);const auto before=screenOf(target);
     if(static_cast<std::int64_t>(before.width)*before.height>64000000)throw std::runtime_error("Use o jogo em um único monitor para selecionar.");
-    selecting=true;ShowWindow(window,SW_HIDE);SetForegroundWindow(target);
-    try{
-        std::mutex sampleMutex;std::condition_variable arrived;aa::Image snapshot;std::string failure;
-        const auto requested=static_cast<std::int64_t>(GetTickCount64());aa::DesktopCapture single;
-        single.start(target,{0,0,before.width,before.height},[&](aa::CaptureFrame frame){
-            std::lock_guard lock(sampleMutex);if(frame.available&&frame.capturedMs>=requested&&!snapshot.valid()){snapshot=std::move(frame.image);arrived.notify_one();}else if(!frame.error.empty())failure=frame.error;
-        });
-        {std::unique_lock lock(sampleMutex);arrived.wait_for(lock,std::chrono::milliseconds(3000),[&]{return snapshot.valid();});}
-        single.stop();if(!snapshot.valid())throw std::runtime_error("Não consegui capturar o jogo. Volte ao Albion e tente novamente. "+failure);
+    CapturePanelGuard restore(*this);
+        auto snapshot=captureOnce(target,{0,0,before.width,before.height});
         auto chosen=aa::selectRegion(window,target,snapshot,before.origin,kind,reference);std::optional<PickedImage> result;
         if(chosen){const auto after=screenOf(target);
             if(after.width!=before.width||after.height!=before.height||after.dpi!=before.dpi||after.device!=before.device)throw std::runtime_error("A tela mudou durante a seleção. Tente novamente.");
             if(!fits(*chosen,before.width,before.height))throw std::runtime_error("A região selecionada está fora da janela.");
             result=PickedImage{*chosen,aa::cropImage(snapshot,*chosen),before};}
-        selecting=false;ShowWindow(window,SW_SHOW);SetForegroundWindow(window);return result;
-    }catch(...){selecting=false;ShowWindow(window,SW_SHOW);SetForegroundWindow(window);throw;}
+        return result;
 }
 std::wstring App::storeImage(const std::wstring& statusId,const aa::Image& image){
     if(!image.valid()||image.width<24||image.height<24||image.width>256||image.height>256)throw std::runtime_error("Selecione um ícone de 24 a 256 pixels.");

@@ -1,4 +1,5 @@
 #include "app.h"
+#include "theme.h"
 #include <shellapi.h>
 #include <objbase.h>
 #include <stdexcept>
@@ -49,9 +50,9 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show){
         int argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);
         for(int i=1;i<argc;++i){const std::wstring arg=argv[i];if(arg==L"--settings"&&i+1<argc)settingsFile=argv[++i];else if(arg==L"--diagnostics")app.diagnostics=true;else if(arg==L"--show-overlay-in-capture")app.showOverlayInCapture=true;}
         LocalFree(argv);app.showOverlayInCapture=app.showOverlayInCapture&&app.diagnostics;app.configureStorage(settingsFile);app.load();
-        WNDCLASSW cls{};cls.hInstance=instance;cls.lpfnWndProc=appProc;cls.lpszClassName=AppWindowClass;cls.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(IDI_APP));cls.hCursor=LoadCursorW(nullptr,IDC_ARROW);cls.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_BTNFACE+1);
+        WNDCLASSW cls{};cls.hInstance=instance;cls.lpfnWndProc=appProc;cls.lpszClassName=AppWindowClass;cls.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(IDI_APP));cls.hCursor=LoadCursorW(nullptr,IDC_ARROW);
         RegisterClassW(&cls);const auto dpi=GetDpiForSystem();RECT bounds{0,0,MulDiv(860,dpi,96),MulDiv(700,dpi,96)};
-        const auto style=WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX;AdjustWindowRectExForDpi(&bounds,style,FALSE,0,dpi);
+        const auto style=WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX|WS_CLIPCHILDREN;AdjustWindowRectExForDpi(&bounds,style,FALSE,0,dpi);
         if(!CreateWindowExW(0,AppWindowClass,L"Albion Assistant",style,CW_USEDEFAULT,CW_USEDEFAULT,bounds.right-bounds.left,bounds.bottom-bounds.top,nullptr,nullptr,instance,&app))throw std::runtime_error("Falha ao abrir aplicativo.");
         ShowWindow(app.window,show);MSG message{};while(GetMessageW(&message,nullptr,0,0)>0){if(!IsDialogMessageW(app.window,&message)){TranslateMessage(&message);DispatchMessageW(&message);}}return 0;
     }catch(const std::exception& error){MessageBoxW(nullptr,widen(error.what()).c_str(),L"Albion Assistant — erro",MB_OK|MB_ICONERROR);return 1;}

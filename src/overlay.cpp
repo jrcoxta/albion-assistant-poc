@@ -1,10 +1,43 @@
 #include "overlay.h"
 
+#include <algorithm>
+#include <cstring>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 
 namespace {
+struct OverlayPlacement {
+    POINT destination{}, source{};
+    SIZE size{}, bitmapSize{};
+};
+std::optional<OverlayPlacement> overlayPlacement(RECT client, RECT icon, POINT origin, int padding) {
+    if (padding <= 0 || client.right <= client.left || client.bottom <= client.top ||
+        icon.left < client.left || icon.top < client.top || icon.right > client.right ||
+        icon.bottom > client.bottom || icon.right <= icon.left || icon.bottom <= icon.top) return std::nullopt;
+    // Alargar antes de subtrair também protege coordenadas de monitores à esquerda/acima.
+    const std::int64_t left = static_cast<std::int64_t>(icon.left) - padding;
+    const std::int64_t top = static_cast<std::int64_t>(icon.top) - padding;
+    const std::int64_t right = static_cast<std::int64_t>(icon.right) + padding;
+    const std::int64_t bottom = static_cast<std::int64_t>(icon.bottom) + padding;
+    const auto clippedLeft = std::max<std::int64_t>(left, client.left);
+    const auto clippedTop = std::max<std::int64_t>(top, client.top);
+    const auto clippedRight = std::min<std::int64_t>(right, client.right);
+    const auto clippedBottom = std::min<std::int64_t>(bottom, client.bottom);
+    const std::int64_t x = origin.x + clippedLeft, y = origin.y + clippedTop;
+    const auto width = right - left, height = bottom - top;
+    constexpr auto maxLong = (std::numeric_limits<LONG>::max)();
+    constexpr auto minLong = (std::numeric_limits<LONG>::min)();
+    if (width > maxLong || height > maxLong || x < minLong || y < minLong ||
+        origin.x + clippedRight > maxLong || origin.y + clippedBottom > maxLong ||
+        static_cast<std::uint64_t>(width) * height > 64000000) return std::nullopt;
+    return OverlayPlacement{{static_cast<LONG>(x), static_cast<LONG>(y)},
+        {static_cast<LONG>(clippedLeft - left), static_cast<LONG>(clippedTop - top)},
+        {static_cast<LONG>(clippedRight - clippedLeft), static_cast<LONG>(clippedBottom - clippedTop)},
+        {static_cast<LONG>(width), static_cast<LONG>(height)}};
+}
+
 LRESULT CALLBACK overlayProc(HWND window, UINT message, WPARAM w, LPARAM l) {
     // Extras defensivos: o click-through entre processos vem de LAYERED + TRANSPARENT.
     if (message == WM_NCHITTEST) return HTTRANSPARENT;
@@ -60,8 +93,12 @@ void Overlay::hide() {
     if (window_ && IsWindowVisible(window_)) ShowWindow(window_, SW_HIDE);
 }
 
-bool Overlay::draw(int width, int height) {
-    const int padding=glow_?12:6;
+bool Overlay::draw(int iconWidth, int iconHeight) {
+    aa::Image image;
+    try { image = aa::renderOverlayEffect(iconWidth, iconHeight, effect_, color_); }
+    catch (const std::exception&) { return false; }
+    if (!image.valid()) return false;
+    const int width = image.width, height = image.height;
     if (width_ != width || height_ != height) {
         BITMAPINFO info{};
         info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -85,27 +122,11 @@ bool Overlay::draw(int width, int height) {
         height_ = height;
         drawn_ = false;
     }
-    // O interior da área permanece transparente; brilho ocupa apenas sua margem.
-    auto* pixels = static_cast<std::uint32_t*>(pixels_);
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            int edge = x;
-            if (y < edge) edge = y;
-            if (width - 1 - x < edge) edge = width - 1 - x;
-            if (height - 1 - y < edge) edge = height - 1 - y;
-            const unsigned alpha = glow_ ? (edge < padding ? static_cast<unsigned>((edge+1)*(edge+1)*170/(padding*padding)) : 0u)
-                                         : edge < 2 ? 32u : edge < 4 ? 96u : edge < padding ? 255u : 0u;
-            const unsigned red = (GetRValue(color_) * alpha + 127) / 255;
-            const unsigned green = (GetGValue(color_) * alpha + 127) / 255;
-            const unsigned blue = (GetBValue(color_) * alpha + 127) / 255;
-            *pixels++ = (alpha << 24) | (red << 16) | (green << 8) | blue;
-        }
-    }
+    std::memcpy(pixels_, image.bgra.data(), image.bgra.size());
     return true;
 }
 
 void Overlay::update(HWND target, RECT icon, bool highlight) {
-    const int padding=glow_?12:6;
     if (!window_) return;
     if (!highlight || !IsWindow(target) || IsIconic(target) || !IsWindowVisible(target) ||
         GetForegroundWindow() != target) {
@@ -114,48 +135,40 @@ void Overlay::update(HWND target, RECT icon, bool highlight) {
     }
     RECT client{};
     POINT origin{};
-    if (!GetClientRect(target, &client) || client.right <= client.left || client.bottom <= client.top ||
-        icon.left < client.left || icon.top < client.top || icon.right > client.right ||
-        icon.bottom > client.bottom || icon.right <= icon.left || icon.bottom <= icon.top ||
-        !ClientToScreen(target, &origin)) {
+    if (!GetClientRect(target, &client) || !ClientToScreen(target, &origin)) {
         hide();
         return;
     }
-    // Todas as somas/diferenças são alargadas antes de operar em coordenadas externas.
-    const std::int64_t width = static_cast<std::int64_t>(icon.right) - icon.left + 2 * padding;
-    const std::int64_t height = static_cast<std::int64_t>(icon.bottom) - icon.top + 2 * padding;
-    const std::int64_t x = static_cast<std::int64_t>(origin.x) + icon.left - padding;
-    const std::int64_t y = static_cast<std::int64_t>(origin.y) + icon.top - padding;
-    constexpr auto maxInt = (std::numeric_limits<int>::max)();
-    constexpr auto minLong = (std::numeric_limits<LONG>::min)();
-    constexpr auto maxLong = (std::numeric_limits<LONG>::max)();
-    if (width > maxInt || height > maxInt || x < minLong || y < minLong ||
-        x + width > maxLong || y + height > maxLong ||
-        static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height) >
-            (std::numeric_limits<DWORD>::max)() / 4u) {
-        hide();
-        return;
-    }
-    const int w = static_cast<int>(width), h = static_cast<int>(height);
-    if (!drawn_ || width_ != w || height_ != h) {
-        if (!draw(w, h)) { hide(); return; }
-        POINT destination{static_cast<LONG>(x), static_cast<LONG>(y)};
-        POINT source{};
-        SIZE size{w, h};
-        BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
-        if (!UpdateLayeredWindow(window_, nullptr, &destination, &size, memoryDC_, &source,
+    const auto iconWidth = static_cast<std::int64_t>(icon.right) - icon.left;
+    const auto iconHeight = static_cast<std::int64_t>(icon.bottom) - icon.top;
+    if (iconWidth <= 0 || iconHeight <= 0 || iconWidth > 16384 || iconHeight > 16384) { hide(); return; }
+    const int iw = static_cast<int>(iconWidth), ih = static_cast<int>(iconHeight);
+    auto placement = overlayPlacement(client, icon, origin, aa::overlayEffectPadding(effect_, iw, ih));
+    if (!placement) { hide(); return; }
+    const bool redraw = !drawn_ || width_ != placement->bitmapSize.cx || height_ != placement->bitmapSize.cy;
+    if (redraw && !draw(iw, ih)) { hide(); return; }
+    const BYTE opacity = aa::overlayEffectOpacity(effect_, GetTickCount64());
+    // Pulso troca somente SourceConstantAlpha: não percorre pixels a cada atualização.
+    if (redraw || opacity_ != opacity || source_.x != placement->source.x || source_.y != placement->source.y ||
+        size_.cx != placement->size.cx || size_.cy != placement->size.cy) {
+        BLENDFUNCTION blend{AC_SRC_OVER, 0, opacity, AC_SRC_ALPHA};
+        if (!UpdateLayeredWindow(window_, nullptr, &placement->destination, &placement->size, memoryDC_, &placement->source,
             0, &blend, ULW_ALPHA)) {
             drawn_ = false;
             hide();
             return;
         }
         drawn_ = true;
+        source_ = placement->source;
+        size_ = placement->size;
+        opacity_ = opacity;
     }
     RECT current{};
-    const RECT desired{static_cast<LONG>(x), static_cast<LONG>(y),
-        static_cast<LONG>(x + width), static_cast<LONG>(y + height)};
+    const int x = placement->destination.x, y = placement->destination.y;
+    const int w = placement->size.cx, h = placement->size.cy;
+    const RECT desired{x, y, x + w, y + h};
     if (IsWindowVisible(window_) && GetWindowRect(window_, &current) && EqualRect(&current, &desired)) return;
     // Movimento sem recodificar/retransmitir o DIB; nunca ativar nem encaminhar input.
-    if (!SetWindowPos(window_, HWND_TOPMOST, static_cast<int>(x), static_cast<int>(y), w, h,
+    if (!SetWindowPos(window_, HWND_TOPMOST, x, y, w, h,
         SWP_NOACTIVATE | SWP_SHOWWINDOW)) hide();
 }

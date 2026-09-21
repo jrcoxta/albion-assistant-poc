@@ -111,6 +111,7 @@ void validate(const Workspace& w) {
                     rule.condition.condition == Condition::Absent, "Condicao de regra invalida.");
             require(rule.condition.stacks >= 1 && rule.condition.stacks <= 99 && rule.condition.color <= 0xFFFFFF,
                     "Stacks ou cor da regra invalidos.");
+            require(rule.effect >= OverlayEffect::Border && rule.effect <= OverlayEffect::Halo, "Efeito de regra invalido.");
         }
     }
     idValid(w.activeHudId, true); idValid(w.activeSetId, true);
@@ -168,6 +169,10 @@ struct IniReader {
         require(n < value.size() - 1, "Campo INI longo demais, leitura seria truncada.");
         value.resize(n); require(value != L"\x1", "Campo INI nao pode ser lido.");
         return value;
+    }
+    bool contains(const std::wstring& section, const wchar_t* key) const {
+        const auto found = remaining.find(section);
+        return found != remaining.end() && found->second.contains(key);
     }
     unsigned number(const std::wstring& section, const wchar_t* key, unsigned maximum) {
         const auto value = text(section, key);
@@ -245,7 +250,10 @@ Workspace readWorkspace(const std::filesystem::path& file) {
             r.condition.enabled = in.number(child, L"enabled", 1) != 0;
             r.condition.condition = static_cast<Condition>(in.number(child, L"condition", 2));
             r.condition.stacks = in.number(child, L"stacks", 99); r.condition.color = in.number(child, L"color", 0xFFFFFF);
-            r.glow = in.number(child, L"glow", 1) != 0; s.rules.push_back(std::move(r));
+            const bool legacyGlow = in.number(child, L"glow", 1) != 0;
+            r.effect = in.contains(child, L"effect") ? static_cast<OverlayEffect>(in.number(child, L"effect", 3)) :
+                (legacyGlow ? OverlayEffect::Glow : OverlayEffect::Border);
+            s.rules.push_back(std::move(r));
         }
         w.sets.push_back(std::move(s));
     }
@@ -428,7 +436,9 @@ void saveWorkspace(const std::filesystem::path& file, const Workspace& w) {
                 text(child, L"id", r.id); text(child, L"statusId", r.statusId); text(child, L"sourceArea", r.sourceArea); text(child, L"targetArea", r.targetArea);
                 text(child, L"name", r.condition.name); text(child, L"profile", r.condition.profile);
                 number(child, L"enabled", r.condition.enabled ? 1 : 0); number(child, L"condition", static_cast<int>(r.condition.condition));
-                number(child, L"stacks", r.condition.stacks); number(child, L"color", r.condition.color); number(child, L"glow", r.glow ? 1 : 0);
+                number(child, L"stacks", r.condition.stacks); number(child, L"color", r.condition.color);
+                number(child, L"glow", r.effect == OverlayEffect::Border ? 0 : 1);
+                number(child, L"effect", static_cast<int>(r.effect));
             }
         }
         // A chamada de flush retorna zero tambem quando tem sucesso; verificar disco abaixo.

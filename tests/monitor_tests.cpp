@@ -18,12 +18,12 @@ int main(){try{
     set.rules={rule(L"r1",L"a",L"Buffs",L"E",aa::Condition::StacksEqual),
                rule(L"r2",L"b",L"Debuffs",L"Q",aa::Condition::Present),
                rule(L"r3",L"a",L"buffs",L"E",aa::Condition::Present)};
-    set.rules[1].glow=true;w.sets.push_back(set);
+    set.rules[1].effect=aa::OverlayEffect::Pulse;w.sets.push_back(set);
     auto plan=aa::makeMonitorPlan(w);
     require(plan.readers.size()==2&&plan.actions.size()==3,"duplicou reconhecimento do mesmo status/regiao");
     require(plan.actions[0].reader==plan.actions[2].reader,"regras do mesmo par nao compartilham observacao");
     require(plan.captureArea.x==10&&plan.captureArea.y==20&&plan.captureArea.width==200&&plan.captureArea.height==120,"ROI agregada incorreta");
-    require(plan.actions[1].rule.glow&&plan.actions[1].target.x==300,"acao/posicao nao preservada");
+    require(plan.actions[1].rule.effect==aa::OverlayEffect::Pulse&&plan.actions[1].target.x==300,"acao/posicao nao preservada");
     require(plan.readers[0].needsStacks&&!plan.readers[1].needsStacks,"presença/ausência exigiu contadores");
     std::vector<aa::Observation> obs={{{aa::Presence::Present,3,1,{},{}},1000,7},{{aa::Presence::Absent,{},1,{},{}},1000,7}};
     require(aa::evaluateMonitor(plan,obs,1000,750,7)==std::vector<bool>({true,false,false}),"prioridade de destino ou condicao incorreta");

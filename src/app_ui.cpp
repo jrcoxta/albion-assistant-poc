@@ -1,5 +1,6 @@
 #include "app.h"
 #include "panel_layout.h"
+#include "theme.h"
 #include "../resources/resource.h"
 #include <commdlg.h>
 #include <algorithm>
@@ -11,6 +12,16 @@ namespace {
 enum {ActiveNames=600, MonitorSummary, RulePhrase, ActiveSetName};
 constexpr COLORREF Colors[]={RGB(255,191,0),RGB(40,255,120),RGB(60,180,255),RGB(240,80,255)};
 const wchar_t* ColorNames[]={L"Dourado",L"Verde",L"Azul",L"Magenta"};
+const wchar_t* EffectNames[]={L"Borda",L"Brilho",L"Pulso",L"Halo"};
+
+struct RebuildScope {
+    App& app;bool previous;
+    theme::RedrawLock redraw;
+    explicit RebuildScope(App& value):app(value),previous(value.rebuilding),redraw(value.window){
+        app.rebuilding=true;
+    }
+    ~RebuildScope(){app.rebuilding=previous;}
+};
 
 int selection(HWND control, bool list=false) {
     return static_cast<int>(SendMessageW(control,list?LB_GETCURSEL:CB_GETCURSEL,0,0));
@@ -96,11 +107,17 @@ HWND App::control(const wchar_t* type,const wchar_t* value,DWORD style,int x,int
     auto child=CreateWindowExW(0,type,value,WS_CHILD|WS_VISIBLE|style,px(x),px(y),px(w),px(h),window,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),instance,nullptr);
     if(!child)throw std::runtime_error("Não foi possível abrir os controles do painel.");
-    SendMessageW(child,WM_SETFONT,reinterpret_cast<WPARAM>(font),TRUE);
+    SendMessageW(child,WM_SETFONT,reinterpret_cast<WPARAM>(font),FALSE);
+    theme::styleControl(child,_wcsicmp(type,L"STATIC")==0?theme::Role::Muted:id==Color?theme::Role::ColorChoice:theme::Role::Normal);
+    if(_wcsicmp(type,L"COMBOBOX")==0){SendMessageW(child,CB_SETITEMHEIGHT,static_cast<WPARAM>(-1),px(22));SendMessageW(child,CB_SETITEMHEIGHT,0,px(28));}
+    if(_wcsicmp(type,L"LISTBOX")==0)SendMessageW(child,LB_SETITEMHEIGHT,0,px(32));
     controls.push_back(child);return child;
 }
 void App::label(const wchar_t* value,int x,int y,int w,int h) {control(L"STATIC",value,0,x,y,w,h);}
-void App::button(const wchar_t* value,int id,int x,int y,int w) {control(L"BUTTON",value,WS_TABSTOP|BS_PUSHBUTTON,x,y,w,30,id);}
+void App::button(const wchar_t* value,int id,int x,int y,int w) {
+    auto child=control(L"BUTTON",value,WS_TABSTOP|BS_PUSHBUTTON,x,y,w,30,id);
+    if(id==Save||id==Start)theme::styleControl(child,theme::Role::Primary);
+}
 void App::edit(const wchar_t* value,int id,int x,int y,int w) {
     auto field=control(L"EDIT",value,WS_TABSTOP|WS_BORDER|ES_AUTOHSCROLL,x,y,w,26,id);
     SendMessageW(field,EM_SETLIMITTEXT,251,0);
@@ -116,7 +133,7 @@ int App::number(int id,int minimum,int maximum) {
 }
 
 void App::makeUI() {
-    rebuilding=true;
+    theme::attachWindow(window);RebuildScope rebuild(*this);
     for(auto child:controls)DestroyWindow(child);
     controls.clear();statusLabel=nullptr;
     if(font)DeleteObject(font);if(titleFont)DeleteObject(titleFont);
@@ -136,14 +153,14 @@ void App::makeUI() {
     }
     font=CreateFontW(-px(15),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
     titleFont=CreateFontW(-px(23),0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
-    auto title=control(L"STATIC",L"Albion Assistant",0,24,15,808,34);
-    SendMessageW(title,WM_SETFONT,reinterpret_cast<WPARAM>(titleFont),TRUE);
+    auto title=control(L"STATIC",L"ALBION ASSISTANT",0,42,15,790,34);
+    SendMessageW(title,WM_SETFONT,reinterpret_cast<WPARAM>(titleFont),FALSE);theme::styleControl(title,theme::Role::Title);
     control(L"STATIC",L"",SS_ENDELLIPSIS,24,53,394,26,ActiveNames);
     control(L"STATIC",L"",SS_ENDELLIPSIS,430,53,402,26,ActiveSetName);
     const wchar_t* tabs[]={L"Monitor",L"HUDs",L"Status",L"Sets e regras"};
-    for(int i=0;i<4;++i){button(tabs[i],Tab0+i,24+i*206,88,194);SendMessageW(item(Tab0+i),BM_SETSTATE,i==page,0);}
-    auto combo=[&](int id,int x,int y,int width) {return control(L"COMBOBOX",L"",WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,x,y,width,240,id);};
-    auto list=[&](int id,int x,int y,int width,int height) {return control(L"LISTBOX",L"",WS_TABSTOP|WS_BORDER|WS_VSCROLL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT,x,y,width,height,id);};
+    for(int i=0;i<4;++i){button(tabs[i],Tab0+i,24+i*206,88,194);theme::styleControl(item(Tab0+i),theme::Role::Tab);theme::setActive(item(Tab0+i),i==page);}
+    auto combo=[&](int id,int x,int y,int width) {return control(L"COMBOBOX",L"",WS_TABSTOP|CBS_DROPDOWNLIST|CBS_OWNERDRAWFIXED|CBS_HASSTRINGS|WS_VSCROLL,x,y,width,240,id);};
+    auto list=[&](int id,int x,int y,int width,int height) {return control(L"LISTBOX",L"",WS_TABSTOP|WS_BORDER|WS_VSCROLL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT|LBS_OWNERDRAWFIXED|LBS_HASSTRINGS,x,y,width,height,id);};
     auto hudChoices=[&](int x,int y,int width) {
         auto field=combo(HudList,x,y,width);for(const auto& value:workspace.huds)add(field,value.name);
         choose(field,indexOf(workspace.huds,workspace.activeHudId));
@@ -225,14 +242,15 @@ void App::makeUI() {
         label(L"Condição",282,361,260);auto condition=combo(ConditionBox,282,383,260);
         add(condition,L"Estiver presente");add(condition,L"Estiver ausente");add(condition,L"Tiver exatamente os stacks");choose(condition,rule()?conditionIndex(rule()->condition.condition):0);
         label(L"Stacks",560,361,110);combo(Stacks,560,383,110);
-        label(L"Destaque",688,361,144);auto effect=combo(EffectBox,688,383,144);add(effect,L"Borda");add(effect,L"Brilho");choose(effect,rule()&&rule()->glow?1:0);
+        label(L"Destaque",688,361,144);auto effect=combo(EffectBox,688,383,144);for(auto name:EffectNames)add(effect,name);choose(effect,rule()?static_cast<int>(rule()->effect):0);
         label(L"Área de destino",282,420,260);auto targetAreas=combo(TargetArea,282,442,260);
         if(hud())for(const auto& value:hud()->areas){add(sourceAreas,value.name);add(targetAreas,value.name);}
         if(rule())for(auto pair:{std::pair{sourceAreas,rule()->sourceArea},std::pair{targetAreas,rule()->targetArea}}) {
             if(!pair.second.empty()&&SendMessageW(pair.first,CB_FINDSTRINGEXACT,static_cast<WPARAM>(-1),reinterpret_cast<LPARAM>(pair.second.c_str()))==CB_ERR)add(pair.first,pair.second);
             selectText(pair.first,pair.second);
         }
-        label(L"Cor",560,420,272);auto colors=combo(Color,560,442,272);int chosenColor=0;
+        label(L"Cor do destaque",560,420,272);auto colors=combo(Color,560,442,124);int chosenColor=0;
+        button(L"Cor da habilidade",SampleColor,694,440,138);
         for(int i=0;i<4;++i){auto row=add(colors,ColorNames[i]);SendMessageW(colors,CB_SETITEMDATA,row,Colors[i]);if(rule()&&rule()->condition.color==Colors[i])chosenColor=i;}
         if(rule()&&std::find(std::begin(Colors),std::end(Colors),rule()->condition.color)==std::end(Colors)) {
             chosenColor=add(colors,L"Cor salva");SendMessageW(colors,CB_SETITEMDATA,chosenColor,rule()->condition.color);
@@ -243,29 +261,30 @@ void App::makeUI() {
         button(L"Subir",MoveRuleUp,24,574,112);button(L"Descer",MoveRuleDown,148,574,114);
         button(L"Testar destaque por 5 s",TestAction,282,551,256);button(L"Salvar set e regra",Save,556,551,276);
         for(int id:{SetName,DeleteSet,NewRule,Save})EnableWindow(item(id),set()!=nullptr);
-        for(int id:{RuleName,Enabled,RuleStatus,SourceArea,ConditionBox,Stacks,EffectBox,TargetArea,Color,TestAction,DeleteRule,MoveRuleUp,MoveRuleDown})EnableWindow(item(id),rule()!=nullptr);
+        for(int id:{RuleName,Enabled,RuleStatus,SourceArea,ConditionBox,Stacks,EffectBox,TargetArea,Color,SampleColor,TestAction,DeleteRule,MoveRuleUp,MoveRuleDown})EnableWindow(item(id),rule()!=nullptr);
         updateRuleChoices();
     }
-    statusLabel=control(L"STATIC",L"",0,24,619,808,49);
+    statusLabel=control(L"STATIC",L"",0,36,627,784,39);theme::styleControl(statusLabel);
     label(L"F8: voltar ao painel / encerrar teste     F9: iniciar ou parar leitura",24,674,808,22);
-    rebuilding=false;refreshStatus();InvalidateRect(window,nullptr,TRUE);
+    refreshStatus();
 }
 
 void App::rebuildUIWithDraft() {
+    RebuildScope rebuild(*this);
     struct Draft {int id;std::wstring value;LRESULT selected;};
     std::vector<Draft> edits,choices;
     for(int id:{HudName,AreaName,StatusName,SampleValue,SetName,RuleName,Validity})if(item(id))edits.push_back({id,text(item(id)),0});
     for(int id:{StatusKind,RuleStatus,SourceArea,TargetArea,ConditionBox,Stacks,EffectBox,Color})if(item(id))choices.push_back({id,text(item(id)),selection(item(id))});
     const auto enabled=item(Enabled)?SendMessageW(item(Enabled),BM_GETCHECK,0,0):BST_UNCHECKED;
     const auto stackSelected=item(StackList)?selection(item(StackList),true):-1;
-    makeUI();rebuilding=true;
+    makeUI();
     for(const auto& draft:edits)SetWindowTextW(item(draft.id),draft.value.c_str());
     for(const auto& draft:choices)if(draft.id!=Stacks)choose(item(draft.id),static_cast<int>(draft.selected));
     if(item(Enabled))SendMessageW(item(Enabled),BM_SETCHECK,enabled,0);
     updateRuleChoices();
     for(const auto& draft:choices)if(draft.id==Stacks)selectText(item(Stacks),draft.value);
     if(item(StackList))choose(item(StackList),stackSelected,true);
-    rebuilding=false;updateRuleChoices();refreshStatus();
+    updateRuleChoices();refreshStatus();
 }
 
 void App::saveEditor() {
@@ -302,7 +321,7 @@ void App::saveEditor() {
                 if(std::find(allowed.begin(),allowed.end(),stacks)!=allowed.end())value.condition.stacks=stacks;
             }
             value.condition.enabled=SendMessageW(item(Enabled),BM_GETCHECK,0,0)==BST_CHECKED;
-            value.glow=selection(item(EffectBox))==1;
+            const auto effect=selection(item(EffectBox));value.effect=static_cast<aa::OverlayEffect>(std::clamp(effect,0,3));
             const auto color=selection(item(Color));
             if(color>=0)value.condition.color=static_cast<std::uint32_t>(SendMessageW(item(Color),CB_GETITEMDATA,color,0));
         }
@@ -327,7 +346,7 @@ void App::updateRuleChoices() {
     else if(needsStacks&&active<0)phrase=L"Escolha um valor de stacks cadastrado. O valor anterior não tem amostra para este status.";
     else {
         phrase+=needsStacks?L"tiver "+text(stackControl)+L" stacks":selection(item(ConditionBox))==1?L"estiver ausente":L"estiver presente";
-        phrase+=L", destacar "+(text(item(TargetArea)).empty()?L"a área de destino":text(item(TargetArea)))+L" com "+(selection(item(EffectBox))==1?L"brilho":L"borda")+L" ("+text(item(Color))+L").";
+        phrase+=L", destacar "+(text(item(TargetArea)).empty()?L"a área de destino":text(item(TargetArea)))+L" com "+text(item(EffectBox))+L" ("+text(item(Color))+L").";
     }
     setIfChanged(item(RulePhrase),rule()?phrase:L"Crie uma regra e escolha o status, as áreas e o destaque.");
 }
@@ -339,6 +358,8 @@ void App::command(int id,int notification) {
         (notification==LBN_SELCHANGE&&(id==StatusList||id==AreaList||id==RuleList));
     if(navigation) {
         const bool list=id==StatusList||id==AreaList||id==RuleList;const auto chosen=selection(item(id),list);
+        const int currentSelection=id==HudList?indexOf(workspace.huds,workspace.activeHudId):id==SetList?indexOf(workspace.sets,workspace.activeSetId):id==StatusList?indexOf(workspace.statuses,selectedStatusId):id==AreaList?selectedArea:selectedRule;
+        if(chosen==currentSelection)return;
         try{saveEditor();}catch(...) {
             const int previous=id==HudList?indexOf(workspace.huds,workspace.activeHudId):id==SetList?indexOf(workspace.sets,workspace.activeSetId):id==StatusList?indexOf(workspace.statuses,selectedStatusId):id==AreaList?selectedArea:selectedRule;
             choose(item(id),previous,list);throw;
@@ -357,11 +378,12 @@ void App::command(int id,int notification) {
         error=L"Seleção atualizada. As alterações anteriores foram salvas.";makeUI();return;
     }
     if(notification!=BN_CLICKED)return;
-    if(id>=Tab0&&id<Tab0+4){saveEditor();page=id-Tab0;if(page==0)capturePreview={};error=L"Alterações salvas.";makeUI();return;}
+    if(id>=Tab0&&id<Tab0+4){if(page==id-Tab0)return;saveEditor();page=id-Tab0;if(page==0)capturePreview={};error=L"Alterações salvas.";makeUI();return;}
     if(id==Stop){stop();error=L"Leitura parada. Os destaques estão apagados.";refreshStatus();return;}
     if(id==Connect){saveEditor();connect();refreshStatus();return;}
     if(id==Start){start();refreshStatus();return;}
     if(id==TestAction){testAction();refreshStatus();return;}
+    if(id==SampleColor){sampleActionColor();refreshStatus();return;}
     if(id==Enabled){updateRuleChoices();return;}
     if(id==Save){
         saveEditor();error=page==1?L"HUD e áreas salvas.":page==2?L"Status salvo na biblioteca.":page==3?L"Set e regras salvos.":L"Ajuste salvo.";
@@ -540,11 +562,21 @@ void App::refreshStatus() {
 }
 
 void App::paint() {
-    PAINTSTRUCT paint{};const auto dc=BeginPaint(window,&paint);
+    PAINTSTRUCT paint{};const auto targetDc=BeginPaint(window,&paint);RECT client{};GetClientRect(window,&client);
+    const auto buffer=CreateCompatibleDC(targetDc);const auto bitmap=CreateCompatibleBitmap(targetDc,client.right,client.bottom);
+    const auto dc=buffer&&bitmap?buffer:targetDc;const auto oldBitmap=buffer&&bitmap?SelectObject(buffer,bitmap):nullptr;
+    const int saved=SaveDC(dc);
+    theme::fill(dc,client,theme::Background);
+    theme::fill(dc,{0,0,client.right,px(3)},theme::Accent);
+    theme::fill(dc,{px(24),px(20),px(28),px(42)},theme::Accent);
+    theme::fill(dc,{px(12),px(128),px(848),px(613)},theme::Panel);
+    theme::frame(dc,{px(12),px(128),px(848),px(613)},RGB(39,44,53));
+    theme::frame(dc,{px(24),px(619),px(832),px(668)},RGB(54,48,49));
+    theme::fill(dc,{px(24),px(619),px(27),px(668)},theme::Accent);
     if(page==0||page==2) {
         const auto& preview=page==0?capturePreview:referencePreview;
         const RECT bounds=page==0?RECT{px(24),px(486),px(832),px(602)}:RECT{px(282),px(330),px(544),px(521)};
-        const auto brush=CreateSolidBrush(RGB(30,34,41));FillRect(dc,&bounds,brush);DeleteObject(brush);
+        theme::fill(dc,bounds,theme::Field);theme::frame(dc,bounds,theme::Border);
         if(preview.valid()) {
             const auto factor=std::min(static_cast<double>(bounds.right-bounds.left)/preview.width,static_cast<double>(bounds.bottom-bounds.top)/preview.height);
             const int width=static_cast<int>(preview.width*factor),height=static_cast<int>(preview.height*factor);
@@ -552,10 +584,13 @@ void App::paint() {
             info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;info.bmiHeader.biCompression=BI_RGB;
             SetStretchBltMode(dc,COLORONCOLOR);StretchDIBits(dc,bounds.left+(bounds.right-bounds.left-width)/2,bounds.top+(bounds.bottom-bounds.top-height)/2,width,height,0,0,preview.width,preview.height,preview.bgra.data(),&info,DIB_RGB_COLORS,SRCCOPY);
         } else {
-            SetBkMode(dc,TRANSPARENT);SetTextColor(dc,RGB(215,220,230));SelectObject(dc,font);auto message=bounds;
+            SetBkMode(dc,TRANSPARENT);SetTextColor(dc,theme::Muted);SelectObject(dc,font);auto message=bounds;
             DrawTextW(dc,page==0?(running?L"Aguardando a primeira captura do jogo...":L"Sem captura. Inicie a leitura após resolver as pendências."):L"Cadastre uma imagem de referência.",-1,&message,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
         }
     }
+    RestoreDC(dc,saved);
+    if(buffer&&bitmap){BitBlt(targetDc,0,0,client.right,client.bottom,buffer,0,0,SRCCOPY);SelectObject(buffer,oldBitmap);}
+    if(bitmap)DeleteObject(bitmap);if(buffer)DeleteDC(buffer);
     EndPaint(window,&paint);
 }
 }

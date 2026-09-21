@@ -83,11 +83,11 @@ aa::Workspace populated(const std::filesystem::path& directory) {
     aa::StatusRule rule;
     rule.id = aa::newId(w); rule.statusId = first.id;
     rule.sourceArea = L"buffs"; rule.targetArea = L"Destino";
-    rule.condition.name = L"Pronto: 3"; rule.condition.profile.clear(); rule.glow = true;
+    rule.condition.name = L"Pronto: 3"; rule.condition.profile.clear(); rule.effect = aa::OverlayEffect::Glow;
     set.rules.push_back(rule);
     rule.id = aa::newId(w); rule.statusId = second.id;
     rule.condition.name = L"Veneno ausente"; rule.condition.condition = aa::Condition::Absent;
-    rule.condition.color = 0x123456; rule.glow = false;
+    rule.condition.color = 0x123456; rule.effect = aa::OverlayEffect::Border;
     set.rules.push_back(rule);
     w.sets.push_back(set); w.activeSetId = set.id;
     set.id = aa::newId(w); set.name = L"Somente veneno"; set.rules.erase(set.rules.begin());
@@ -110,7 +110,7 @@ void roundtripAndIsolation() {
     check(loaded.huds[1].areas[0].region.x == 111 && loaded.huds[1].clientWidth == 3440 &&
           loaded.huds[0].monitorDpi == 144 && loaded.huds[0].areas[0].iconCalibrated,
           "coordenadas e calibracoes separadas por HUD");
-    check(loaded.sets[0].rules.size() == 2 && loaded.sets[0].rules[0].glow &&
+    check(loaded.sets[0].rules.size() == 2 && loaded.sets[0].rules[0].effect == aa::OverlayEffect::Glow &&
           loaded.sets[0].rules[1].condition.condition == aa::Condition::Absent &&
           loaded.sets[0].rules[1].condition.color == 0x123456 && loaded.statuses[1].debuff &&
           loaded.statuses[1].referencePath == w.statuses[1].referencePath &&
@@ -150,6 +150,40 @@ void roundtripAndIsolation() {
     check(loaded.huds.empty() && loaded.sets.empty() && loaded.statuses.size() == 1,
           "ultima HUD e set nao ressuscitam com legado presente ao reiniciar");
     check(aa::newId(loaded) != w.huds[0].id, "contador de IDs persiste apos exclusoes");
+}
+void effectCompatibility() {
+    TemporaryDirectory directory;
+    const auto file = directory.path / L"workspace.ini";
+    aa::saveWorkspace(file, populated(directory.path));
+    ini(file, L"set.0.rule.0", L"effect", L"2");
+    const auto loaded = aa::loadWorkspace(file, {});
+    check(loaded.sets[0].rules[0].condition.name == L"Pronto: 3" && loaded.sets[0].rules[0].effect == aa::OverlayEffect::Pulse,
+          "efeito explicito nao prevalece sobre brilho legado");
+    for (int effect = 0; effect <= 3; ++effect) {
+        auto changed = loaded; changed.sets[0].rules[0].effect = static_cast<aa::OverlayEffect>(effect);
+        aa::saveWorkspace(file, changed);
+        const auto restored = aa::loadWorkspace(file, {});
+        check(restored.sets[0].rules[0].effect == changed.sets[0].rules[0].effect &&
+              restored.sets[0].rules[1].condition.color == 0x123456 && restored.huds[1].areas[0].region.x == 111,
+              "efeito nao persiste ou altera HUD/cor de outra regra");
+    }
+    ini(file, L"set.0.rule.0", L"effect", nullptr);
+    ini(file, L"set.0.rule.0", L"glow", L"1");
+    check(aa::loadWorkspace(file, {}).sets[0].rules[0].effect == aa::OverlayEffect::Glow, "brilho legado nao migra");
+    ini(file, L"set.0.rule.0", L"glow", L"0");
+    check(aa::loadWorkspace(file, {}).sets[0].rules[0].effect == aa::OverlayEffect::Border, "borda legada nao migra");
+    for (const auto value : {L"4", L"-1", L"x", L""}) {
+        ini(file, L"set.0.rule.0", L"effect", value);
+        const auto intact = bytes(file);
+        rejected([&] { (void)aa::loadWorkspace(file, {}); }, "efeito invalido foi aceito");
+        check(bytes(file) == intact, "leitura invalida sobrescreveu workspace");
+    }
+    aa::saveWorkspace(file, loaded);const auto intact = bytes(file);
+    auto invalid = loaded;invalid.sets[0].rules[0].effect = static_cast<aa::OverlayEffect>(4);
+    rejected([&] { aa::saveWorkspace(file, invalid); }, "gravacao aceitou efeito invalido");
+    check(bytes(file) == intact, "gravacao invalida alterou workspace salvo");
+    ini(file, L"set.0.rule.0", L"glow", L"2");
+    rejected([&] { (void)aa::loadWorkspace(file, {}); }, "efeito novo ocultou campo legado invalido");
 }
 void invalidData() {
     TemporaryDirectory directory;
@@ -315,7 +349,7 @@ void readiness() {
 }
 }
 int main() {
-    try { temporaryIsolation(); roundtripAndIsolation(); invalidData(); migration(); readiness(); }
+    try { temporaryIsolation(); roundtripAndIsolation(); effectCompatibility(); invalidData(); migration(); readiness(); }
     catch (const std::exception& error) { std::cerr << "FALHOU: " << error.what() << '\n'; return 1; }
     std::cout << checks << " verificacoes de workspace, 0 falhas\n";
     return 0;
