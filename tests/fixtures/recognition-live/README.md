@@ -12,3 +12,9 @@ Os nomes preservam o timestamp e a **saída antiga** do aplicativo; `stacks-unkn
 Estas amostras reproduzem o erro de alinhamento: a busca de identidade alternava a caixa entre `(33,12)` e `(35,11)` conforme o relógio, enquanto o contador só aceitava deslocamento de um pixel. Os templates originais de 2 e 3 também possuem pequenos deslocamentos relativos ao aro. O teste exige leitura independente por imagem; nunca mantém o contador do frame anterior.
 
 O conjunto é uma regressão do problema observado, não uma estimativa estatística de precisão em outros HUDs, resoluções ou condições.
+
+## Relógio radial experimental
+
+O recorte `[35,11,99,75)` de `12036046-stacks-unknown.png` foi preservado em `assets/assassin-clock.png` como referência iluminada independente da identidade. Os testes conferem igualdade dos pixels de origem. Na máscara interna sem contador, essa imagem coincide com o máximo de brilho observado nas 20 ROIs positivas.
+
+Os casos de relógio usam intervalos largos de fração compatíveis com a posição visível da frente: `12038609` e `12046609` no começo do primeiro quadrante; `12039187` mais adiante nesse quadrante. Não são rótulos de duração ou uma estimativa de precisão. O corpus não mostra o restante da volta. Há recuos da frente mantendo 3 stacks, portanto uma renovação não é inferida a partir do contador. Frente encoberta, ausência de contraste ou referência já sombreada devem produzir fração desconhecida.

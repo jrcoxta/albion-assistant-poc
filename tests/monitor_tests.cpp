@@ -25,6 +25,16 @@ int main(){try{
     require(plan.captureArea.x==10&&plan.captureArea.y==20&&plan.captureArea.width==200&&plan.captureArea.height==120,"ROI agregada incorreta");
     require(plan.actions[1].rule.effect==aa::OverlayEffect::Pulse&&plan.actions[1].target.x==300,"acao/posicao nao preservada");
     require(plan.readers[0].needsStacks&&!plan.readers[1].needsStacks,"presença/ausência exigiu contadores");
+    require(!plan.readers[0].needsClock&&!plan.readers[1].needsClock,"regra antiga solicitou relogio");
+    {
+        auto clocks=w;clocks.sets[0].rules[2].followClock=true;
+        clocks.sets[0].rules[1].followClock=true;clocks.sets[0].rules[1].condition.condition=aa::Condition::Absent;
+        const auto timed=aa::makeMonitorPlan(clocks);
+        require(timed.readers.size()==2&&timed.readers[0].needsClock&&!timed.readers[1].needsClock,
+                "relogio nao compartilha origem ou foi exigido por ausencia");
+        clocks.sets[0].rules[2].condition.enabled=false;
+        require(!aa::makeMonitorPlan(clocks).readers[0].needsClock,"regra desativada exigiu relogio");
+    }
     {
         auto circular=w;
         circular.huds[0].areas[0].region={10,20,80,80,aa::RegionShape::Circle};
@@ -37,6 +47,27 @@ int main(){try{
                 "forma de origem/destino foi perdida ou contaminou outra area");
     }
     std::vector<aa::Observation> obs={{{aa::Presence::Present,3,1,{},{}},1000,7},{{aa::Presence::Absent,{},1,{},{}},1000,7}};
+    {
+        auto timed=plan;for(auto& action:timed.actions)action.rule.followClock=true;
+        auto readings=obs;readings[0].detection.remainingFraction=.3f;
+        std::vector<std::optional<float>> remaining;
+        const auto evaluate=[&](int now=1000,std::uint64_t source=7){return aa::evaluateMonitor(timed,readings,now,750,source,&remaining);};
+        require(evaluate()==std::vector<bool>({true,false,false})&&remaining[0]==.3f&&!remaining[1]&&!remaining[2],"aro nao pertence somente a acao vencedora");
+        readings[0].detection.remainingFraction=.9f;evaluate();require(remaining[0]==.9f,"renovacao com mesmos stacks nao aumentou aro");
+        readings[0].detection.remainingFraction.reset();
+        require(evaluate()[0]&&!remaining[0],"relogio incerto manteve aro ou apagou aura valida");
+        readings[0].detection.remainingFraction=.5f;readings[0].detection.stacks=2;
+        require(evaluate()==std::vector<bool>({false,false,true})&&!remaining[0]&&remaining[2]==.5f,"troca de prioridade reaproveitou aro da acao antiga");
+        readings[1].detection.presence=aa::Presence::Present;readings[1].detection.remainingFraction=.7f;
+        require(evaluate()[1]&&remaining[1]==.7f&&remaining[2]==.5f,"relogios de origens distintas se contaminaram");
+        require(evaluate(1750)==std::vector<bool>({false,false,false})&&!remaining[1]&&!remaining[2],"dados expirados mantiveram aros");
+        require(evaluate(1000,8)==std::vector<bool>({false,false,false})&&!remaining[1]&&!remaining[2],"fonte antiga manteve aros");
+        readings[0].detection.presence=aa::Presence::Unknown;
+        require(!evaluate()[2]&&!remaining[2],"status desconhecido manteve aro");
+        timed.actions[0].rule.condition.condition=aa::Condition::Absent;readings[0].detection.presence=aa::Presence::Absent;
+        require(evaluate()[0]&&!remaining[0],"regra de ausencia mostrou tempo restante");
+        readings.clear();require(evaluate()==std::vector<bool>({false,false,false})&&!remaining[0]&&!remaining[1],"lote incompleto manteve aro anterior");
+    }
     require(aa::evaluateMonitor(plan,obs,1000,750,7)==std::vector<bool>({true,false,false}),"prioridade de destino ou condicao incorreta");
     obs[0].detection.stacks=2;obs[1].detection.presence=aa::Presence::Present;
     require(aa::evaluateMonitor(plan,obs,1000,750,7)==std::vector<bool>({false,true,true}),"regras de status diferentes se contaminaram");

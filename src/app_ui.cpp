@@ -210,15 +210,19 @@ void App::makeUI() {
         label(L"Nome do status",282,136,352);edit(selectedStatus()?selectedStatus()->name.c_str():L"",StatusName,282,160,352);
         label(L"Tipo",652,136,180);auto kind=combo(StatusKind,652,160,180);add(kind,L"Buff");add(kind,L"Debuff");choose(kind,selectedStatus()&&selectedStatus()->debuff?1:0);
         button(L"Capturar referência",CaptureStatus,282,211,170);button(L"Importar imagem",ImportStatus,464,211,170);button(L"Adicionar exemplo",AddPreset,646,211,186);
-        label(selectedStatus()?(selectedStatus()->builtinAssassin?L"Referência do exemplo incluído. Capture uma imagem para substituí-la.":selectedStatus()->referencePath.empty()?L"Referência pendente. Capture o ícone no jogo ou importe uma imagem.":L"Referência salva na biblioteca."):L"Crie um status para cadastrar qualquer buff ou debuff.",282,255,550,44);
+        const auto status=selectedStatus();
+        const auto referenceInfo=status?std::wstring(status->builtinAssassin?L"Identidade: exemplo incluído.":status->referencePath.empty()?L"Identidade: capture ou importe uma referência.":L"Identidade: referência salva.")+L"\nRelógio: "+(!status->clockReferencePath.empty()?L"referência salva.":status->builtinAssassin?L"referência do exemplo incluída.":L"referência ainda não capturada."):L"Crie um status para cadastrar qualquer buff ou debuff.";
+        label(referenceInfo.c_str(),282,255,550,44);
         label(L"Imagem de referência",282,304,260);label(L"Amostras de stacks",568,304,264);
         auto stacks=list(StackList,568,330,264,151);
         if(selectedStatus())for(auto value:aa::stackValues(*selectedStatus())) {
             const auto row=add(stacks,std::to_wstring(value)+L" stacks",true);SendMessageW(stacks,LB_SETITEMDATA,row,value);
         }
         choose(stacks,0,true);button(L"Excluir amostra selecionada",DeleteStack,568,491,264);
+        button(L"Capturar relógio",CaptureClock,282,491,260);
         button(L"Novo status",NewStatus,24,547,112);button(L"Excluir status",DeleteStatus,148,547,114);
         label(L"Valor",282,551,58);edit(L"1",SampleValue,344,549,54);button(L"Capturar amostra",CaptureStack,410,547,216);button(L"Salvar status",Save,644,547,188);
+        label(L"Renove o status antes de capturar o relógio; selecione o ícone inteiro, sem sombra.",24,584,808,24);
         referencePreview={};
         if(selectedStatus()) {
             try {
@@ -226,7 +230,7 @@ void App::makeUI() {
                 else if(selectedStatus()->builtinAssassin)referencePreview=aa::loadImageResource(IDR_ASSASSIN_NONE);
             }catch(const std::exception& e){error=L"Não foi possível abrir a referência: "+widen(e.what());}
         }
-        for(int id:{StatusName,StatusKind,CaptureStatus,ImportStatus,DeleteStatus,SampleValue,CaptureStack,StackList,DeleteStack,Save})EnableWindow(item(id),selectedStatus()!=nullptr);
+        for(int id:{StatusName,StatusKind,CaptureStatus,ImportStatus,DeleteStatus,SampleValue,CaptureStack,StackList,DeleteStack,CaptureClock,Save})EnableWindow(item(id),selectedStatus()!=nullptr);
     } else {
         label(L"Sets salvos",24,136,284);setChoices(24,158,284);
         label(L"Nome do set",326,136,326);edit(set()?set()->name.c_str():L"",SetName,326,158,326);
@@ -260,7 +264,10 @@ void App::makeUI() {
             chosenColor=add(colors,L"Cor salva");SendMessageW(colors,CB_SETITEMDATA,chosenColor,rule()->condition.color);
         }
         choose(colors,chosenColor);
-        control(L"STATIC",L"",0,282,486,550,55,RulePhrase);
+        control(L"BUTTON",L"Acompanhar relógio do status (experimental)",WS_TABSTOP|BS_AUTOCHECKBOX,282,474,550,26,FollowClock);
+        SendMessageW(item(FollowClock),BM_SETCHECK,rule()&&rule()->followClock?BST_CHECKED:BST_UNCHECKED,0);
+        control(L"STATIC",L"",0,282,505,550,41,RulePhrase);
+        control(L"STATIC",L"",0,282,588,550,24,ClockHint);
         button(L"Nova regra",NewRule,24,535,112);button(L"Excluir regra",DeleteRule,148,535,114);
         button(L"Subir",MoveRuleUp,24,574,112);button(L"Descer",MoveRuleDown,148,574,114);
         button(L"Testar destaque por 5 s",TestAction,282,551,256);button(L"Salvar set e regra",Save,556,551,276);
@@ -280,11 +287,13 @@ void App::rebuildUIWithDraft() {
     for(int id:{HudName,AreaName,StatusName,SampleValue,SetName,RuleName,Validity})if(item(id))edits.push_back({id,text(item(id)),0});
     for(int id:{StatusKind,RuleStatus,SourceArea,TargetArea,ConditionBox,Stacks,EffectBox,Color})if(item(id))choices.push_back({id,text(item(id)),selection(item(id))});
     const auto enabled=item(Enabled)?SendMessageW(item(Enabled),BM_GETCHECK,0,0):BST_UNCHECKED;
+    const auto followClock=item(FollowClock)?SendMessageW(item(FollowClock),BM_GETCHECK,0,0):BST_UNCHECKED;
     const auto stackSelected=item(StackList)?selection(item(StackList),true):-1;
     makeUI();
     for(const auto& draft:edits)SetWindowTextW(item(draft.id),draft.value.c_str());
     for(const auto& draft:choices)if(draft.id!=Stacks)choose(item(draft.id),static_cast<int>(draft.selected));
     if(item(Enabled))SendMessageW(item(Enabled),BM_SETCHECK,enabled,0);
+    if(item(FollowClock))SendMessageW(item(FollowClock),BM_SETCHECK,followClock,0);
     updateRuleChoices();
     for(const auto& draft:choices)if(draft.id==Stacks)selectText(item(Stacks),draft.value);
     if(item(StackList))choose(item(StackList),stackSelected,true);
@@ -325,6 +334,7 @@ void App::saveEditor() {
                 if(std::find(allowed.begin(),allowed.end(),stacks)!=allowed.end())value.condition.stacks=stacks;
             }
             value.condition.enabled=SendMessageW(item(Enabled),BM_GETCHECK,0,0)==BST_CHECKED;
+            value.followClock=value.condition.condition!=aa::Condition::Absent&&SendMessageW(item(FollowClock),BM_GETCHECK,0,0)==BST_CHECKED;
             const auto effect=selection(item(EffectBox));value.effect=static_cast<aa::OverlayEffect>(std::clamp(effect,0,3));
             const auto color=selection(item(Color));
             if(color>=0)value.condition.color=static_cast<std::uint32_t>(SendMessageW(item(Color),CB_GETITEMDATA,color,0));
@@ -345,6 +355,16 @@ void App::updateRuleChoices() {
     choose(stackControl,active);
     const bool needsStacks=selection(item(ConditionBox))==2;
     EnableWindow(stackControl,rule()&&needsStacks&&!values.empty());
+    const bool canFollow=rule()&&selection(item(ConditionBox))!=1;
+    EnableWindow(item(FollowClock),canFollow);
+    if(!canFollow)SendMessageW(item(FollowClock),BM_SETCHECK,BST_UNCHECKED,0);
+    std::wstring clockHint;
+    if(canFollow&&SendMessageW(item(FollowClock),BM_GETCHECK,0,0)==BST_CHECKED) {
+        std::error_code ignored;
+        const bool hasReference=status&&(!status->clockReferencePath.empty()?std::filesystem::is_regular_file(status->clockReferencePath,ignored):status->builtinAssassin);
+        clockHint=hasReference?L"Aro segue o buff; início/fim e oclusões podem ocultá-lo.":L"Relógio sem referência. Capture em Status; a aura continua ativa.";
+    }
+    setIfChanged(item(ClockHint),clockHint);
     auto phrase=std::wstring(L"Quando ")+(status?status->name:L"o status escolhido")+L", na área "+(text(item(SourceArea)).empty()?L"de origem":text(item(SourceArea)))+L", ";
     if(needsStacks&&values.empty())phrase=L"Cadastre uma amostra de stacks desse status na aba Status para usar esta condição.";
     else if(needsStacks&&active<0)phrase=L"Escolha um valor de stacks cadastrado. O valor anterior não tem amostra para este status.";
@@ -357,6 +377,7 @@ void App::updateRuleChoices() {
 
 void App::command(int id,int notification) {
     if(rebuilding||selecting)return;
+    if(id==FollowClock&&notification==BN_CLICKED){updateRuleChoices();return;}
     if(notification==CBN_SELCHANGE&&(id==RuleStatus||id==ConditionBox||id==Stacks||id==EffectBox||id==Color||id==SourceArea||id==TargetArea)){updateRuleChoices();return;}
     const bool navigation=(notification==CBN_SELCHANGE&&(id==HudList||id==SetList))||
         (notification==LBN_SELCHANGE&&(id==StatusList||id==AreaList||id==RuleList));
@@ -388,6 +409,12 @@ void App::command(int id,int notification) {
     if(id==Start){start();refreshStatus();return;}
     if(id==TestAction){testAction();refreshStatus();return;}
     if(id==SampleColor){sampleActionColor();refreshStatus();return;}
+    if(id==CaptureClock){
+        saveEditor();stop();
+        auto chosen=pick(aa::SelectionKind::Icon,nullptr,aa::RegionShape::Circle);
+        if(chosen)applyClockReference(chosen->image);else error=L"Captura cancelada. A referência do relógio foi mantida.";
+        makeUI();return;
+    }
     if(id==Enabled){updateRuleChoices();return;}
     if(id==Save){
         saveEditor();error=page==1?L"HUD e áreas salvas.":page==2?L"Status salvo na biblioteca.":page==3?L"Set e regras salvos.":L"Ajuste salvo.";
@@ -460,7 +487,7 @@ void App::command(int id,int notification) {
             dialog.lpstrFilter=L"Imagem de referência (PNG/BMP)\0*.png;*.bmp\0";dialog.lpstrFile=path;dialog.nMaxFile=32768;dialog.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST;
             if(!GetOpenFileNameW(&dialog))return;image=aa::loadImage(path);
         }
-        status->referencePath=storeImage(status->id,image);status->builtinAssassin=false;status->stacks.clear();
+        status->referencePath=storeImage(status->id,image);status->builtinAssassin=false;status->stacks.clear();status->clockReferencePath.clear();
         error=L"Referência salva. Cadastre novamente as amostras de stacks para esta imagem.";break;
     }
     case CaptureStack: {
@@ -521,7 +548,7 @@ void App::refreshStatus() {
     setIfChanged(item(ActiveNames),L"HUD ativa: "+(hud()?hud()->name:L"nenhuma"));
     setIfChanged(item(ActiveSetName),L"Set ativo: "+(set()?set()->name:L"nenhum"));
     std::wstring state=error.empty()&&!running?L"Leitura parada. Escolha uma HUD e um set para iniciar.":error;
-    if(previewUntil)state=L"TESTE VISUAL · Leitura pausada. O destaque dura 5 segundos; F8 encerra.";
+    if(previewUntil)state=L"TESTE VISUAL · Simulação de 5 segundos, sem medir o buff. F8 encerra.";
     else if(running) {
         if(!geometryMatches())state=L"A tela ou escala mudou. Destaques apagados; escolha uma HUD correspondente.";
         else if(GetForegroundWindow()!=target)state=L"Jogo em segundo plano. Os destaques ficam apagados até voltar ao Albion.";
@@ -556,6 +583,11 @@ void App::refreshStatus() {
                 if(detection.presence==aa::Presence::Unknown)summary+=L"não confirmado";
                 else if(detection.presence==aa::Presence::Absent)summary+=L"ausente";
                 else summary+=L"identificado · stacks "+(detection.stacks?std::to_wstring(*detection.stacks):L"desconhecidos");
+                if(plan.readers[i].needsClock) {
+                    if(i>=recognizers.size()||!recognizers[i]->clockReady())summary+=L" · relógio indisponível: capture a referência na aba Status";
+                    else if(detection.remainingFraction)summary+=L" · relógio observado: "+std::to_wstring(static_cast<int>(*detection.remainingFraction*100))+L"%";
+                    else summary+=L" · relógio sem leitura confiável";
+                }
             }
             summary+=L"\r\n";
         }
@@ -580,7 +612,7 @@ void App::paint() {
     theme::fill(dc,{px(24),px(619),px(27),px(668)},theme::Accent);
     if(page==0||page==2) {
         const auto& preview=page==0?capturePreview:referencePreview;
-        const RECT bounds=page==0?RECT{px(24),px(486),px(832),px(602)}:RECT{px(282),px(330),px(544),px(521)};
+        const RECT bounds=page==0?RECT{px(24),px(486),px(832),px(602)}:RECT{px(282),px(330),px(544),px(481)};
         theme::fill(dc,bounds,theme::Field);theme::frame(dc,bounds,theme::Border);
         if(preview.valid()) {
             const auto factor=std::min(static_cast<double>(bounds.right-bounds.left)/preview.width,static_cast<double>(bounds.bottom-bounds.top)/preview.height);

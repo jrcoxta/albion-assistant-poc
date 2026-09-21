@@ -14,6 +14,12 @@ Abra **`dist/AlbionAssistant.exe`**. É o único arquivo necessário para usar o
 
 F8 abre o painel; F9 inicia ou para a leitura. O destaque apaga quando o jogo perde foco ou a informação fica incerta/expirada. O padrão de validade é 750 ms.
 
+Para acrescentar um aro regressivo, marque **Acompanhar relógio do status (experimental)** na regra. Ele segue a sombra radial observada no buff, junto à aura da habilidade. Não começa uma contagem ao atingir 3 stacks nem presume a duração do status. Uma renovação observada pode voltar a preencher o aro. O teste de 5 segundos é identificado como **SIMULAÇÃO DO ARO**.
+
+O exemplo de Espírito Assassino inclui uma referência própria do relógio. Para outro status, renove o efeito antes de clicar em **Status → Capturar relógio** e selecione o ícone inteiro, iluminado, sem a sombra do relógio. Essa captura preserva a referência de identidade e as amostras de stacks. Trocar a identidade do status invalida a referência temporal anterior. Uma referência ausente ou inválida deixa somente o aro indisponível, com aviso no Monitor; a regra e a aura continuam funcionando.
+
+O aro pode sumir quando não há fronteira legível, inclusive no começo/fim do efeito ou quando o contador a encobre. Isso significa tempo desconhecido, não confirmação de que o buff acabou. O trecho inicial foi verificado em algumas capturas reais; a volta completa, renovação contínua e outros status ainda precisam de validação no jogo. Testes sintéticos também exercitam ícones de 40, 48, 64 e 96 pixels; ícones muito pequenos podem não fornecer evidência suficiente.
+
 ## Dados e telas
 
 As configurações ficam em **`%LOCALAPPDATA%\AlbionAssistant`**: `workspace.ini`, imagens em `status-images` e diagnósticos quando ativados. Atualizar o EXE ou limpar o build não altera esses dados. O parâmetro opcional `--settings caminho.ini` isola o workspace e as imagens na pasta escolhida.
@@ -61,7 +67,7 @@ Os presets `windows-release` e `windows-debug` em `CMakePresets.json` também po
 
 ## Limites da POC
 
-Cada set aceita até 32 regras; cada HUD, até 32 áreas. A biblioteca aceita até 64 status e amostras rotuladas de **1 a 99 stacks**. Esses números são rótulos de imagens cadastradas, não OCR universal: o usuário precisa capturar o contador visível. A leitura espera ícones com contador branco no canto inferior direito, como nas amostras do Albion. Recortes têm entre 24 e 256 pixels. Contador ilegível permanece desconhecido; ausência de número não significa 1. O relógio radial é tratado como variação visual, sem cálculo de segundos restantes.
+Cada set aceita até 32 regras; cada HUD, até 32 áreas. A biblioteca aceita até 64 status e amostras rotuladas de **1 a 99 stacks**. Esses números são rótulos de imagens cadastradas, não OCR universal: o usuário precisa capturar o contador visível. A leitura espera ícones com contador branco no canto inferior direito, como nas amostras do Albion. Recortes têm entre 24 e 256 pixels. Contador ilegível permanece desconhecido; ausência de número não significa 1. O acompanhamento opcional do relógio estima somente uma fração visual, sem cálculo de segundos restantes.
 
 Vários status são acompanhados no mesmo ciclo; regras do mesmo status na mesma área compartilham a leitura. Cada ação usa sua própria condição. Se duas regras verdadeiras usam a mesma área de destino, vence a primeira na lista. Borda e Halo contornam a forma selecionada com centro transparente. Brilho cria uma aura translúcida sobre a habilidade e ao redor dela; Pulso varia suavemente essa intensidade. Todos permitem clicar na habilidade. A captura de cor não aumenta a área de leitura contínua.
 

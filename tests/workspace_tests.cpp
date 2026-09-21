@@ -178,6 +178,30 @@ void shapeCompatibility() {
     ini(file, L"hud.0.area.1", L"height", L"61");
     rejected([&] { (void)aa::loadWorkspace(file, {}); }, "circulo nao quadrado foi lido");
 }
+void clockCompatibility() {
+    TemporaryDirectory directory;
+    const auto file = directory.path / L"workspace.ini";
+    aa::saveWorkspace(file, populated(directory.path));
+    ini(file, L"set.0.rule.0", L"followClock", L"1");
+    ini(file, L"status.0", L"clockReferencePath", L"\"relogio.png\"");
+    const auto loaded = aa::loadWorkspace(file, {});
+    check(loaded.sets[0].rules[0].condition.name == L"Pronto: 3", "relogio alterou regra existente");
+    check(loaded.sets[0].rules[0].followClock && loaded.statuses[0].clockReferencePath == L"relogio.png", "opcao/referencia do relogio nao lida");
+    aa::saveWorkspace(file, loaded);
+    const auto roundtrip=aa::loadWorkspace(file, {});
+    check(roundtrip.sets[0].rules[0].followClock && roundtrip.statuses[0].clockReferencePath==loaded.statuses[0].clockReferencePath &&
+          roundtrip.huds[0].areas[0].region.x==loaded.huds[0].areas[0].region.x, "relogio nao persiste ou altera HUD");
+    check(aa::readinessIssues(roundtrip).empty(), "referencia temporal ausente bloqueou leitura e aura");
+    ini(file, L"set.0.rule.0", L"followClock", nullptr);
+    ini(file, L"status.0", L"clockReferencePath", nullptr);
+    const auto legacy=aa::loadWorkspace(file, {});
+    check(!legacy.sets[0].rules[0].followClock && legacy.statuses[0].clockReferencePath.empty(), "workspace antigo habilitou relogio sozinho");
+    for(const auto value:{L"2",L"-1",L"x",L""}) {
+        ini(file,L"set.0.rule.0",L"followClock",value);const auto intact=bytes(file);
+        rejected([&]{(void)aa::loadWorkspace(file,{});},"opcao invalida de relogio aceita");
+        check(bytes(file)==intact,"opcao invalida sobrescreveu arquivo");
+    }
+}
 void effectCompatibility() {
     TemporaryDirectory directory;
     const auto file = directory.path / L"workspace.ini";
@@ -376,7 +400,7 @@ void readiness() {
 }
 }
 int main() {
-    try { temporaryIsolation(); roundtripAndIsolation(); shapeCompatibility(); effectCompatibility(); invalidData(); migration(); readiness(); }
+    try { temporaryIsolation(); roundtripAndIsolation(); shapeCompatibility(); effectCompatibility(); clockCompatibility(); invalidData(); migration(); readiness(); }
     catch (const std::exception& error) { std::cerr << "FALHOU: " << error.what() << '\n'; return 1; }
     std::cout << checks << " verificacoes de workspace, 0 falhas\n";
     return 0;

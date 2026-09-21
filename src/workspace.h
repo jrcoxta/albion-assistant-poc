@@ -24,12 +24,14 @@ struct StatusDefinition {
     bool builtinAssassin = false;
     std::wstring referencePath;
     std::vector<StackSample> stacks;
+    std::wstring clockReferencePath;
 };
 struct StatusRule {
     std::wstring id, statusId;
     std::wstring sourceArea, targetArea;
     Rule condition;
     OverlayEffect effect = OverlayEffect::Border;
+    bool followClock = false;
 };
 struct SetProfile { std::wstring id, name; std::vector<StatusRule> rules; };
 struct Workspace {

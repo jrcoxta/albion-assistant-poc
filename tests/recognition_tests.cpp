@@ -44,6 +44,113 @@ aa::Image withCounter(aa::Image image,const char* glyph) {
             for(int channel=0;channel<3;++channel) image.bgra[((36+y*3+dy)*64+41+x*3+dx)*4+channel]=255;
     return image;
 }
+aa::Image radialShadow(aa::Image image,float darkDegrees,float factor=.32f) {
+    constexpr double pi=3.14159265358979323846;
+    const double center=(image.width-1)/2.0;
+    for(int y=0;y<image.height;++y) for(int x=0;x<image.width;++x) {
+        const double dx=x-center,dy=center-y;
+        double angle=std::atan2(dx,dy)*180/pi;
+        if(angle<0) angle+=360;
+        if(std::hypot(dx,dy)>image.width*.39 || angle>=darkDegrees) continue;
+        for(int c=0;c<3;++c) {
+            auto& value=image.bgra[(std::size_t(y)*image.width+x)*4+c];
+            value=static_cast<std::uint8_t>(value*factor);
+        }
+    }
+    return image;
+}
+void checkRadialClock(const std::filesystem::path& assets) {
+    const auto clean=genericStatus();
+    aa::Recognizer clock;
+    clock.setReference(clean);
+    check(!clock.clockReady(),"Referencia de identidade nao cadastra relogio implicitamente");
+    check(!clock.recognize(radialShadow(clean,45),64).remainingFraction,"Sem referencia propria o relogio e desconhecido");
+    check(clock.setClockReference(clean) && clock.clockReady(),"Referencia iluminada habilita leitura do relogio");
+    // Setores desenhados geometricamente, independentes do estimador. Regioes
+    // com a frente sob o contador nao recebem um valor esperado inventado.
+    for(float angle:{45.f,200.f,270.f,315.f}) {
+        const auto measured=clock.recognize(radialShadow(clean,angle),64);
+        check(measured.presence==aa::Presence::Present && measured.remainingFraction.has_value(),
+            "Setor visivel deve fornecer fracao sem depender de contador");
+        check(std::abs(*measured.remainingFraction-(1-angle/360))<.045f,"Fracao segue angulo observado em quadrantes visiveis");
+    }
+    for(int size:{40,48,64,96}) for(float angle:{45.f,270.f}) {
+        aa::Recognizer scaled;
+        const auto reference=resize(clean,size);
+        scaled.setReference(reference);
+        check(scaled.setClockReference(reference),"Referencia de relogio na escala calibrada e aceita");
+        const auto measured=scaled.recognize(resize(radialShadow(clean,angle),size),size);
+        if(!measured.remainingFraction || std::abs(*measured.remainingFraction-(1-angle/360))>=.045f)
+            std::cerr<<"Relogio sintetico escala "<<size<<" angulo "<<angle<<": fracao "<<measured.remainingFraction.value_or(-1.f)<<"\n";
+        check(measured.remainingFraction && std::abs(*measured.remainingFraction-(1-angle/360))<.045f,
+            "Relogio sintetico visivel em 40,48,64 e96 pixels segue fracao geometrica");
+    }
+    for(float angle:{0.f,360.f,135.f})
+        check(!clock.recognize(radialShadow(clean,angle),64).remainingFraction,
+            "Relogio uniforme ou frente oculta fica desconhecido");
+    auto separated=radialShadow(clean,45),checker=clean,occluded=radialShadow(clean,45);
+    constexpr double pi=3.14159265358979323846;
+    for(int y=0;y<64;++y)for(int x=0;x<64;++x) {
+        double angle=std::atan2(x-31.5,31.5-y)*180/pi;
+        if(angle<0)angle+=360;
+        for(int c=0;c<3;++c) {
+            const auto index=(std::size_t(y)*64+x)*4+c;
+            if(angle>=180 && angle<225 && std::hypot(x-31.5,y-31.5)<25)
+                separated.bgra[index]=static_cast<std::uint8_t>(separated.bgra[index]*.32f);
+            if((x/4+y/4)%2)checker.bgra[index]=static_cast<std::uint8_t>(checker.bgra[index]*.32f);
+            if(x>=32 && x<56 && y>=16 && y<24)occluded.bgra[index]=0;
+        }
+    }
+    for(const auto& corrupted:{separated,checker,occluded}) {
+        const auto measured=clock.recognize(corrupted,64);
+        check(measured.presence==aa::Presence::Present,"Negativo radial preserva identidade para exercitar o estimador");
+        check(!measured.remainingFraction,"Setores separados, xadrez ou faixa opaca nao formam frente confiavel");
+    }
+    auto globalDark=clean;
+    for(auto& value:globalDark.bgra)value=static_cast<std::uint8_t>(value*.32f);
+    check(!clock.recognize(globalDark,64).remainingFraction,"Escurecimento global nao e progresso radial");
+    check(!clock.recognize(aa::Image{64,64,std::vector<std::uint8_t>(64*64*4,0)},64).remainingFraction,
+        "Captura preta nao produz progresso");
+    const auto shifted=clock.recognize(place(radialShadow(clean,270),110,100,23,17),64);
+    check(shifted.remainingFraction && std::abs(*shifted.remainingFraction-.25f)<.045f,
+        "Relogio usa a posicao localizada dentro da ROI");
+    clock.setClockReference(radialShadow(clean,45));
+    check(!clock.recognize(radialShadow(clean,80),64).remainingFraction,
+        "Referencia com sombra nao pode zerar a origem do relogio");
+    check(clock.setClockReference(clean),"Restaurar referencia iluminada");
+    clock.setReference(clean);
+    check(!clock.clockReady() && !clock.recognize(radialShadow(clean,45),64).remainingFraction,
+        "Trocar identidade invalida referencia de relogio anterior");
+    check(clock.setClockReference(clean),"Reativar referencia para validar cadastro invalido");
+    check(!clock.setClockReference({}) && !clock.clockReady(),"Referencia invalida apaga relogio para nao conservar valor antigo");
+
+    const auto live=assets.parent_path()/"tests"/"fixtures"/"recognition-live";
+    const auto full=aa::loadImage(live/"12036046-stacks-unknown.png");
+    const auto reference=aa::loadImage(assets/"assassin-clock.png");
+    check(reference.width==64 && reference.height==64,"Referencia de relogio tem recorte original de 64px");
+    for(int y=0;y<64;++y)for(int x=0;x<64;++x)for(int c=0;c<3;++c)
+        check(reference.bgra[(y*64+x)*4+c]==full.bgra[((y+11)*full.width+x+35)*4+c],
+            "Referencia de relogio preserva os pixels do print real");
+    aa::Recognizer real(assets);
+    check(real.setClockReference(reference),"Referencia real propria e aceita");
+    // Intervalos largos cobrem somente a geometria visivel conferida no corpus:
+    // frente entre ~20 e40 graus; ~45 e65 graus; e novamente ~20 e40 graus.
+    struct ClockCase { const char* file; float low,high; };
+    for(const auto& sample:{ClockCase{"12038609-stacks-unknown.png",.88f,.95f},
+            ClockCase{"12039187-stacks-2.png",.81f,.89f},
+            ClockCase{"12046609-stacks-3.png",.88f,.95f}}) {
+        const auto measured=real.recognize(aa::loadImage(live/sample.file),64);
+        if(!measured.remainingFraction || *measured.remainingFraction<sample.low || *measured.remainingFraction>sample.high)
+            std::cerr<<"Relogio "<<sample.file<<": fracao "<<measured.remainingFraction.value_or(-1.f)<<"\n";
+        check(measured.remainingFraction && *measured.remainingFraction>=sample.low && *measured.remainingFraction<=sample.high,
+            "Fracao real concorda com quadrante observado sem prometer precisao temporal");
+    }
+    const auto last=aa::loadImage(live/"12046609-stacks-3.png");
+    real.setClockReference(aa::loadImage(assets/"assassin-none.png"));
+    check(!real.recognize(last,64).remainingFraction,"Referencia real ja sombreada deixa progresso desconhecido");
+    real.setClockReference(aa::loadImage(assets/"other-food.png"));
+    check(!real.recognize(last,64).remainingFraction,"Referencia de outro status nao produz relogio");
+}
 void checkCircularSearch(const aa::Recognizer& recognizer,const aa::Image& three) {
     aa::Image blankCircle{64,64,std::vector<std::uint8_t>(64*64*4,0)};
     check(recognizer.recognize(blankCircle,32,aa::RegionShape::Circle).presence==aa::Presence::Unknown,"circulo uniforme deve ficar desconhecido");
@@ -224,6 +331,7 @@ int main(int argc,char** argv) {
         custom.setReference({});
         check(custom.recognize(three,64).presence==aa::Presence::Unknown,"Referencia invalida apaga identidade anterior");
         checkGenericCounters();
+        checkRadialClock(assets);
         struct RealCase { const char* file; aa::Presence presence; std::optional<unsigned> stacks; };
         const RealCase liveCases[]={
             {"12025625-stacks-unknown.png",aa::Presence::Absent,{}},

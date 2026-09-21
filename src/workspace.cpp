@@ -88,7 +88,7 @@ void validate(const Workspace& w) {
         }
     }
     for (const auto& status : w.statuses) {
-        entity(status, statusNames); textValid(status.referencePath);
+        entity(status, statusNames); textValid(status.referencePath); textValid(status.clockReferencePath);
         require(status.stacks.size() <= 99, "Limite de 99 amostras de stacks excedido.");
         std::set<unsigned> labels;
         for (const auto& sample : status.stacks) {
@@ -231,6 +231,7 @@ Workspace readWorkspace(const std::filesystem::path& file) {
         s.id = in.text(section, L"id"); s.name = in.text(section, L"name");
         s.debuff = in.number(section, L"debuff", 1) != 0; s.builtinAssassin = in.number(section, L"builtinAssassin", 1) != 0;
         s.referencePath = in.text(section, L"referencePath");
+        if (in.contains(section, L"clockReferencePath")) s.clockReferencePath = in.text(section, L"clockReferencePath");
         const auto count = in.number(section, L"stackCount", 99);
         for (unsigned j = 0; j < count; ++j) {
             const auto child = indexed(section + L".stack", j);
@@ -255,6 +256,7 @@ Workspace readWorkspace(const std::filesystem::path& file) {
             const bool legacyGlow = in.number(child, L"glow", 1) != 0;
             r.effect = in.contains(child, L"effect") ? static_cast<OverlayEffect>(in.number(child, L"effect", 3)) :
                 (legacyGlow ? OverlayEffect::Glow : OverlayEffect::Border);
+            if (in.contains(child, L"followClock")) r.followClock = in.number(child, L"followClock", 1) != 0;
             s.rules.push_back(std::move(r));
         }
         w.sets.push_back(std::move(s));
@@ -426,6 +428,7 @@ void saveWorkspace(const std::filesystem::path& file, const Workspace& w) {
             const auto section = indexed(L"status", i); const auto& s = w.statuses[i];
             text(section, L"id", s.id); text(section, L"name", s.name); number(section, L"debuff", s.debuff ? 1 : 0);
             number(section, L"builtinAssassin", s.builtinAssassin ? 1 : 0); text(section, L"referencePath", s.referencePath); number(section, L"stackCount", s.stacks.size());
+            text(section, L"clockReferencePath", s.clockReferencePath);
             for (std::size_t j = 0; j < s.stacks.size(); ++j) {
                 const auto child = indexed(section + L".stack", j);
                 number(child, L"value", s.stacks[j].value); text(child, L"path", s.stacks[j].path);
@@ -442,6 +445,7 @@ void saveWorkspace(const std::filesystem::path& file, const Workspace& w) {
                 number(child, L"stacks", r.condition.stacks); number(child, L"color", r.condition.color);
                 number(child, L"glow", r.effect == OverlayEffect::Border ? 0 : 1);
                 number(child, L"effect", static_cast<int>(r.effect));
+                number(child, L"followClock", r.followClock ? 1 : 0);
             }
         }
         // A chamada de flush retorna zero tambem quando tem sucesso; verificar disco abaixo.

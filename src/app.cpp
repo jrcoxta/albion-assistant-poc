@@ -58,6 +58,13 @@ std::unique_ptr<aa::Recognizer> makeRecognizer(const aa::MonitorReader& reader){
         for(const auto& sample:reader.status.stacks)
             if(!recognizer->setStackReference(sample.value,aa::loadImage(sample.path)))throw std::runtime_error("Uma amostra de contador é inválida. Recapture esse valor na biblioteca de status.");
     }else recognizer->clearStackReferences();
+    if(reader.needsClock) {
+        // O relógio é opcional: uma referência temporal ruim não desativa presença/stacks.
+        try {
+            if(!reader.status.clockReferencePath.empty())recognizer->setClockReference(aa::loadImage(reader.status.clockReferencePath));
+            else if(reader.status.builtinAssassin)recognizer->setClockReference(aa::loadImageResource(IDR_ASSASSIN_CLOCK));
+        }catch(const std::exception&){recognizer->setClockReference({});}
+    }
     return recognizer;
     }catch(const std::exception& error){
         const int size=WideCharToMultiByte(CP_UTF8,0,reader.status.name.data(),static_cast<int>(reader.status.name.size()),nullptr,0,nullptr,nullptr);
@@ -176,17 +183,20 @@ void App::updateHighlight(){
     const auto now=static_cast<std::int64_t>(GetTickCount64());const bool geometry=geometryMatches();
     if(previewUntil){
         const bool active=static_cast<std::uint64_t>(now)<previewUntil&&geometry;
-        if(testOverlay)testOverlay->update(target,rect(previewTarget),active);
+        if(testOverlay){testOverlay->setRemaining(active&&previewClock?std::optional<float>{static_cast<float>(previewUntil-now)/5000.f}:std::nullopt);testOverlay->update(target,rect(previewTarget),active);}
         if(active&&GetForegroundWindow()==target){
-            const auto screen=screenOf(target);auto caption=L"TESTE DA AÇÃO · "+std::to_wstring((previewUntil-now+999)/1000)+L" s · F8 encerra";
+            const auto screen=screenOf(target);auto caption=std::wstring(previewClock?L"SIMULAÇÃO DO ARO · ":L"TESTE DA AÇÃO · ")+std::to_wstring((previewUntil-now+999)/1000)+L" s · F8 encerra";
             SetWindowTextW(badge,caption.c_str());SetWindowPos(badge,HWND_TOPMOST,screen.origin.x+(screen.width-px(450))/2,screen.origin.y+px(40),px(450),px(42),SWP_NOACTIVATE|SWP_SHOWWINDOW);
         }else if(badge)ShowWindow(badge,SW_HIDE);
         if(!active){previewUntil=0;error=L"Teste da ação encerrado. Ele não inicia a leitura das regras.";ShowWindow(window,SW_RESTORE);SetForegroundWindow(window);}
         return;
     }
-    if(running&&geometry&&GetForegroundWindow()==target)lit=aa::evaluateMonitor(plan,current,now,workspace.validityMs,source);
+    std::vector<std::optional<float>> remaining(plan.actions.size());
+    if(running&&geometry&&GetForegroundWindow()==target)lit=aa::evaluateMonitor(plan,current,now,workspace.validityMs,source,&remaining);
     else lit.assign(plan.actions.size(),false);
-    for(std::size_t i=0;i<overlays.size();++i)overlays[i]->update(target,rect(plan.actions[i].target),lit[i]);
+    for(std::size_t i=0;i<overlays.size();++i) {
+        overlays[i]->setRemaining(remaining[i]);overlays[i]->update(target,rect(plan.actions[i].target),lit[i]);
+    }
     if(diagnostics&&running){std::string state;for(bool on:lit)state+=on?'1':'0';
         if(state!=lastTrace){lastTrace=state;if(!trace.is_open())trace.open(directory/L"diagnostics.csv",std::ios::app);trace<<now<<",actions,"<<state<<'\n';trace.flush();}}
 }
@@ -198,6 +208,7 @@ void App::testAction(){
     const auto destination=std::find_if(layout->areas.begin(),layout->areas.end(),[&](const auto& a){return aa::sameName(a.name,action->targetArea);});
     if(destination==layout->areas.end()||!fits(destination->region,layout->clientWidth,layout->clientHeight))throw std::runtime_error("Selecione a área de destino desta regra na página HUDs.");
     previewTarget=destination->region;
+    previewClock=action->followClock&&action->condition.condition!=aa::Condition::Absent;
     if(!testOverlay){testOverlay=std::make_unique<Overlay>();testOverlay->setCaptureVisible(showOverlayInCapture);testOverlay->initialize(instance);}
     testOverlay->setColor(action->condition.color);testOverlay->setEffect(action->effect);testOverlay->setShape(previewTarget.shape);
     if(!badge){badge=CreateWindowExW(WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_NOACTIVATE|WS_EX_TOPMOST|WS_EX_TOOLWINDOW,L"STATIC",L"TESTE DA AÇÃO",WS_POPUP|SS_CENTER|SS_CENTERIMAGE,0,0,1,1,nullptr,nullptr,instance,nullptr);
@@ -213,6 +224,14 @@ bool App::applyActionColor(const aa::Image& image){
     for(auto& profile:changed.sets)if(profile.id==workspace.activeSetId)
         profile.rules.at(static_cast<std::size_t>(selectedRule)).condition.color=*color;
     commit(std::move(changed));error=L"Cor capturada e salva. Capture novamente para atualizar.";return true;
+}
+void App::applyClockReference(const aa::Image& image){
+    if(!selectedStatus())throw std::runtime_error("Escolha um status para guardar a referência do relógio.");
+    aa::Recognizer validator;
+    if(!validator.setClockReference(image))throw std::runtime_error("Selecione o ícone inteiro e iluminado, com 24 a 256 pixels.");
+    auto changed=workspace;
+    for(auto& status:changed.statuses)if(status.id==selectedStatusId)status.clockReferencePath=storeImage(status.id,image);
+    commit(std::move(changed));error=L"Referência do relógio salva. Ative o acompanhamento nas regras desejadas.";
 }
 void App::sampleActionColor(const std::function<aa::Image(HWND,RECT)>& captureFrame){
     if(selecting)return;

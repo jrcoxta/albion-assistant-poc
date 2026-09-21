@@ -1,6 +1,7 @@
 #include "overlay.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <cstdint>
 #include <limits>
@@ -93,9 +94,17 @@ void Overlay::hide() {
     if (window_ && IsWindowVisible(window_)) ShowWindow(window_, SW_HIDE);
 }
 
+void Overlay::setRemaining(std::optional<float> remaining) {
+    if (remaining && (!std::isfinite(*remaining) || *remaining < 0 || *remaining > 1)) remaining.reset();
+    // Quantizar só o desenho evita recodificar o DIB por ruído entre frames, sem inventar um relógio.
+    if (remaining) remaining = std::round(*remaining * 120.0f) / 120.0f;
+    if (remaining == 0.0f) remaining.reset();
+    if (remaining_ != remaining) { remaining_ = remaining; drawn_ = false; }
+}
+
 bool Overlay::draw(int iconWidth, int iconHeight) {
     aa::Image image;
-    try { image = aa::renderOverlayEffect(iconWidth, iconHeight, effect_, color_, shape_); }
+    try { image = aa::renderOverlayEffect(iconWidth, iconHeight, effect_, color_, shape_, remaining_); }
     catch (const std::exception&) { return false; }
     if (!image.valid()) return false;
     const int width = image.width, height = image.height;

@@ -1,5 +1,6 @@
 #include "monitor.h"
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 namespace aa {
 MonitorPlan makeMonitorPlan(const Workspace& workspace){
@@ -27,6 +28,7 @@ MonitorPlan makeMonitorPlan(const Workspace& workspace){
             }
         }
         if(rule.condition.condition==Condition::StacksEqual)result.readers[index].needsStacks=true;
+        if(rule.followClock&&rule.condition.condition!=Condition::Absent)result.readers[index].needsClock=true;
         const auto target=std::find_if(hud->areas.begin(),hud->areas.end(),[&](const auto& a){return sameName(a.name,rule.targetArea);});
         if(target==hud->areas.end())throw std::runtime_error("Destino da regra ausente.");
         result.actions.push_back({rule,target->region,index});
@@ -35,8 +37,10 @@ MonitorPlan makeMonitorPlan(const Workspace& workspace){
     return result;
 }
 std::vector<bool> evaluateMonitor(const MonitorPlan& plan,const std::vector<Observation>& observations,
-                                 std::int64_t nowMs,int validityMs,std::uint64_t source){
+                                 std::int64_t nowMs,int validityMs,std::uint64_t source,
+                                 std::vector<std::optional<float>>* remainingFractions){
     std::vector<bool> active(plan.actions.size(),false);
+    if(remainingFractions)remainingFractions->assign(plan.actions.size(),std::nullopt);
     if(observations.size()!=plan.readers.size())return active;
     for(std::size_t i=0;i<plan.actions.size();++i){
         const auto& a=plan.actions[i];
@@ -44,6 +48,10 @@ std::vector<bool> evaluateMonitor(const MonitorPlan& plan,const std::vector<Obse
         bool occupied=false;
         for(std::size_t j=0;j<i;++j)if(active[j]&&sameName(plan.actions[j].rule.targetArea,a.rule.targetArea)){occupied=true;break;}
         active[i]=!occupied;
+        const auto& detection=observations[a.reader].detection;
+        if(remainingFractions&&active[i]&&a.rule.followClock&&a.rule.condition.condition!=Condition::Absent&&detection.presence==Presence::Present&&
+           detection.remainingFraction&&std::isfinite(*detection.remainingFraction)&&*detection.remainingFraction>=0&&*detection.remainingFraction<=1)
+            (*remainingFractions)[i]=detection.remainingFraction;
     }
     return active;
 }

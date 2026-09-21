@@ -15,6 +15,7 @@ public:
     void setColor(COLORREF color) { if (color_ != color) { color_ = color; drawn_ = false; } }
     void setEffect(aa::OverlayEffect effect) { if (effect_ != effect) { effect_ = effect; drawn_ = false; } }
     void setShape(aa::RegionShape shape) { if (shape_ != shape) { shape_ = shape; drawn_ = false; } }
+    void setRemaining(std::optional<float> remaining);
 private:
     HWND window_ = nullptr;
     HDC memoryDC_ = nullptr;
@@ -25,6 +26,7 @@ private:
     bool captureVisible_ = false;
     aa::OverlayEffect effect_ = aa::OverlayEffect::Border;
     aa::RegionShape shape_ = aa::RegionShape::Rectangle;
+    std::optional<float> remaining_;
     COLORREF color_ = RGB(255, 191, 0);
     POINT source_{};
     SIZE size_{};

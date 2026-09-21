@@ -122,6 +122,50 @@ void rasterChecks() {
         }
     }
 }
+void remainingRingChecks() {
+    // Cada ponto fica no meio de um quadrante: o apagamento parte de 12h e segue no sentido horário.
+    const POINT circlePoints[] = {{54, 9}, {54, 54}, {9, 54}, {9, 9}};
+    const POINT ellipsePoints[] = {{81, 6}, {81, 41}, {14, 41}, {14, 6}};
+    for (const auto shape : {aa::RegionShape::Circle, aa::RegionShape::Rectangle})
+    for (const auto effect : {aa::OverlayEffect::Border, aa::OverlayEffect::Glow,
+                              aa::OverlayEffect::Pulse, aa::OverlayEffect::Halo}) {
+        const int w = shape == aa::RegionShape::Circle ? 64 : 96;
+        const int h = shape == aa::RegionShape::Circle ? 64 : 48;
+        const auto* points = shape == aa::RegionShape::Circle ? circlePoints : ellipsePoints;
+        const auto base = aa::renderOverlayEffect(w, h, effect, RGB(255, 96, 32), shape);
+        const int p = (base.width - w) / 2;
+        const auto samePixel = [&](const aa::Image& image, int x, int y) {
+            const auto i = at(base, x, y);
+            return std::equal(base.bgra.begin() + i, base.bgra.begin() + i + 4, image.bgra.begin() + i);
+        };
+        const auto absent = aa::renderOverlayEffect(w, h, effect, RGB(255, 96, 32), shape, std::nullopt);
+        check(absent.bgra == base.bgra, "Tempo desconhecido alterou o efeito existente");
+        for (const float invalid : {-0.01f, 1.01f, std::numeric_limits<float>::quiet_NaN(),
+                                    std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity()})
+            check(aa::renderOverlayEffect(w, h, effect, RGB(255, 96, 32), shape, invalid).bgra == base.bgra,
+                  "Fração inválida inventou um relógio");
+        for (int cleared = 0; cleared <= 4; ++cleared) {
+            const float remaining = 1.0f - cleared * 0.25f;
+            const auto image = aa::renderOverlayEffect(w, h, effect, RGB(255, 96, 32), shape, remaining);
+            check(image.valid() && image.width == base.width && image.height == base.height,
+                  "Aro alterou a geometria e o recorte do efeito");
+            for (int quadrant = 0; quadrant < 4; ++quadrant) {
+                const int x = p + points[quadrant].x, y = p + points[quadrant].y;
+                if (quadrant < cleared) check(samePixel(image, x, y), "Aro não esvazia no sentido horário desde 12h");
+                else check(alphaAt(image, x, y) > alphaAt(base, x, y) + 30,
+                           "Aro restante não é legível sobre o perímetro selecionado");
+            }
+            check(samePixel(image, p + w / 2, p + h / 2) &&
+                  samePixel(image, p + w / 2 + 6, p + h / 2) &&
+                  samePixel(image, 2, p + h / 2),
+                  "Aro cobriu o ícone ou substituiu a aura existente");
+            if (remaining == 0) check(image.bgra == base.bgra, "Tempo zerado deixou um aro colorido");
+            for (std::size_t i = 0; i < image.bgra.size(); i += 4)
+                check(image.bgra[i] <= image.bgra[i + 3] && image.bgra[i + 1] <= image.bgra[i + 3] &&
+                      image.bgra[i + 2] <= image.bgra[i + 3], "Aro perdeu BGRA premultiplicado");
+        }
+    }
+}
 void placementChecks() {
     const auto full = overlayPlacement({0, 0, 100, 80}, {30, 20, 70, 60}, {-200, 150}, 8);
     check(full && full->destination.x == -178 && full->destination.y == 162 && full->source.x == 0 &&
@@ -168,6 +212,7 @@ void colorChecks() {
 void visibilityChecks() {
     Overlay overlay;
     overlay.initialize(GetModuleHandleW(nullptr));
+    overlay.setRemaining(0.75f);
     HWND window = nullptr;
     EnumThreadWindows(GetCurrentThreadId(), [](HWND candidate, LPARAM result) -> BOOL {
         wchar_t name[80]{};
@@ -214,7 +259,7 @@ void visibilityChecks() {
     DestroyWindow(target);
 }
 
-void saveGallery(const std::filesystem::path& directory) {
+void saveGallery(const std::filesystem::path& directory, bool timer = false) {
     auto canvas = solid(1320, 630, 14, 19, 28);
     // Fundo apenas ilustrativo, com variação visível sob a composição translúcida.
     for (int y = 72; y < 566; ++y) for (int x = 20; x < canvas.width - 20; ++x) {
@@ -254,10 +299,13 @@ void saveGallery(const std::filesystem::path& directory) {
         const auto shape = row == 0 ? aa::RegionShape::Rectangle : aa::RegionShape::Circle;
         const int centerX = 110 + cell * 220, centerY = 182 + row * 250;
         compose(icon, centerX - icon.width / 2, centerY - icon.height / 2, 255);
-        if (cell == 0) continue;
-        const auto effect = aa::renderOverlayEffect(icon.width, icon.height, effects[cell], color, shape);
+        if (cell == 0 && !timer) continue;
+        const auto selectedEffect = timer ? aa::OverlayEffect::Glow : effects[cell];
+        const std::optional<float> remaining = timer && cell > 0 ?
+            std::optional<float>(1.0f - (cell - 1) * 0.25f) : std::nullopt;
+        const auto effect = aa::renderOverlayEffect(icon.width, icon.height, selectedEffect, color, shape, remaining);
         compose(effect, centerX - effect.width / 2, centerY - effect.height / 2,
-                aa::overlayEffectOpacity(effects[cell], cell == 4 ? 750 : 0));
+                aa::overlayEffectOpacity(selectedEffect, cell == 4 ? 750 : 0));
     }
     BITMAPINFO info{};
     info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -273,8 +321,11 @@ void saveGallery(const std::filesystem::path& directory) {
     std::memcpy(bits, canvas.bgra.data(), canvas.bgra.size());
     SetBkMode(dc, TRANSPARENT); SetTextColor(dc, RGB(228, 235, 247));
     RECT heading{20, 20, 1300, 54};
-    DrawTextW(dc, L"Prévias do overlay · cor extraída do ícone · aura translúcida", -1, &heading, DT_CENTER | DT_SINGLELINE);
-    const wchar_t* labels[] = {L"Sem efeito", L"Borda", L"Brilho", L"Pulso · forte", L"Pulso · suave", L"Halo"};
+    DrawTextW(dc, timer ? L"Prévias do aro regressivo · frações simuladas · aura preservada" :
+              L"Prévias do overlay · cor extraída do ícone · aura translúcida", -1, &heading, DT_CENTER | DT_SINGLELINE);
+    const wchar_t* effectLabels[] = {L"Sem efeito", L"Borda", L"Brilho", L"Pulso · forte", L"Pulso · suave", L"Halo"};
+    const wchar_t* timerLabels[] = {L"Sem relógio", L"100%", L"75%", L"50%", L"25%", L"0%"};
+    const auto* labels = timer ? timerLabels : effectLabels;
     for (int row = 0; row < 2; ++row) {
         RECT label{36, 86 + row * 250, 360, 118 + row * 250};
         DrawTextW(dc, row == 0 ? L"Área retangular" : L"Área circular", -1, &label, DT_LEFT | DT_SINGLELINE);
@@ -291,17 +342,17 @@ void saveGallery(const std::filesystem::path& directory) {
     SelectObject(dc, oldFont); SelectObject(dc, oldBitmap);
     DeleteObject(font); DeleteObject(bitmap); DeleteDC(dc);
     std::filesystem::create_directories(directory);
-    aa::saveImage(canvas, directory / "overlay-effects.png");
+    aa::saveImage(canvas, directory / (timer ? "timer-overlay.png" : "overlay-effects.png"));
 }
 }
 int main(int argc, char** argv) {
     const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     try {
-        rasterChecks(); placementChecks(); colorChecks(); visibilityChecks();
+        rasterChecks(); remainingRingChecks(); placementChecks(); colorChecks(); visibilityChecks();
         check(overlayProc(nullptr, WM_NCHITTEST, 0, 0) == HTTRANSPARENT, "Overlay deixou de ser click-through");
         check(overlayProc(nullptr, WM_MOUSEACTIVATE, 0, 0) == MA_NOACTIVATE, "Overlay pode roubar foco");
-        if (argc > 1) saveGallery(argv[1]);
-        std::cout << "overlay: raster, pulso, recorte, cor e guards nativos passaram\n";
+        if (argc > 1) { saveGallery(argv[1]); saveGallery(argv[1], true); }
+        std::cout << "overlay: raster, aro regressivo, pulso, recorte, cor e guards nativos passaram\n";
         if (SUCCEEDED(com)) CoUninitialize();
         return 0;
     } catch (const std::exception& error) {

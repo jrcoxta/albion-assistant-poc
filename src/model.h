@@ -21,7 +21,7 @@ struct Region {
 };
 enum class Presence { Unknown, Absent, Present };
 enum class Condition { StacksEqual, Present, Absent };
-struct Detection { Presence presence=Presence::Unknown; std::optional<unsigned> stacks; float confidence=0; Region icon; std::string detail; };
+struct Detection { Presence presence=Presence::Unknown; std::optional<unsigned> stacks; float confidence=0; Region icon; std::string detail; std::optional<float> remainingFraction; };
 struct Rule { std::wstring name=L"Espírito Assassino: 3 stacks"; std::wstring profile=L"Mortíficos"; bool enabled=true; Condition condition=Condition::StacksEqual; unsigned stacks=3; std::uint32_t color=0x00BFFF; };
 struct Settings {
     Region buffs, highlight;

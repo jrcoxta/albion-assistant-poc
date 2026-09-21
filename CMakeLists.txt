@@ -16,7 +16,8 @@ set_property(SOURCE "${APP_RESOURCES}" PROPERTY OBJECT_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/resources/app.ico"
     "${CMAKE_CURRENT_SOURCE_DIR}/assets/assassin-none.png"
     "${CMAKE_CURRENT_SOURCE_DIR}/assets/assassin-2.png"
-    "${CMAKE_CURRENT_SOURCE_DIR}/assets/assassin-3.png")
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/assassin-3.png"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/assassin-clock.png")
 include(CTest)
 add_library(assistant_rules src/rules.cpp src/settings.cpp src/profiles.cpp src/workspace.cpp src/monitor.cpp)
 target_include_directories(assistant_rules PUBLIC src)

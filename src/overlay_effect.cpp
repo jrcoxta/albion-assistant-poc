@@ -19,7 +19,8 @@ int overlayEffectPadding(OverlayEffect effect, int iconWidth, int iconHeight, Re
     return 0;
 }
 
-Image renderOverlayEffect(int iconWidth, int iconHeight, OverlayEffect effect, std::uint32_t color, RegionShape shape) {
+Image renderOverlayEffect(int iconWidth, int iconHeight, OverlayEffect effect, std::uint32_t color, RegionShape shape,
+                          std::optional<float> remaining) {
     const int padding = overlayEffectPadding(effect, iconWidth, iconHeight, shape);
     if (!padding) return {};
     const int width = iconWidth + 2 * padding, height = iconHeight + 2 * padding;
@@ -58,6 +59,34 @@ Image renderOverlayEffect(int iconWidth, int iconHeight, OverlayEffect effect, s
         image.bgra[i + 1] = static_cast<std::uint8_t>((green * alpha + 127) / 255);
         image.bgra[i + 2] = static_cast<std::uint8_t>((red * alpha + 127) / 255);
         image.bgra[i + 3] = static_cast<std::uint8_t>(alpha);
+    }
+    if (!remaining || !std::isfinite(*remaining) || *remaining <= 0 || *remaining > 1) return image;
+    const double clearedAngle = (1.0 - *remaining) * 2.0 * std::numbers::pi;
+    // Aro sobre o perímetro; retângulos usam a elipse inscrita. O centro e a aura ficam preservados.
+    for (int y = padding - 3; y < height - padding + 3; ++y)
+    for (int x = padding - 3; x < width - padding + 3; ++x) {
+        const double nx = (x + 0.5 - padding - halfWidth) / halfWidth;
+        const double ny = (y + 0.5 - padding - halfHeight) / halfHeight;
+        const double radial = std::hypot(nx, ny);
+        if (radial == 0) continue;
+        // Distância aproximada pela normal da elipse mantém a espessura também em áreas alongadas.
+        const double distance = std::abs((radial - 1.0) * radial / std::hypot(nx / halfWidth, ny / halfHeight));
+        if (distance >= 3.0) continue;
+        double angle = std::atan2(nx, -ny);
+        if (angle < 0) angle += 2.0 * std::numbers::pi;
+        if (angle < clearedAngle) continue;
+        const auto i = (static_cast<std::size_t>(y) * width + x) * 4;
+        const auto over = [&](unsigned r, unsigned g, unsigned b, double coverage) {
+            const unsigned alpha = static_cast<unsigned>(std::lround(coverage * 255));
+            image.bgra[i] = static_cast<std::uint8_t>((b * alpha + image.bgra[i] * (255 - alpha) + 127) / 255);
+            image.bgra[i + 1] = static_cast<std::uint8_t>((g * alpha + image.bgra[i + 1] * (255 - alpha) + 127) / 255);
+            image.bgra[i + 2] = static_cast<std::uint8_t>((r * alpha + image.bgra[i + 2] * (255 - alpha) + 127) / 255);
+            image.bgra[i + 3] = static_cast<std::uint8_t>(alpha + (image.bgra[i + 3] * (255 - alpha) + 127) / 255);
+        };
+        // Contraste escuro e cor levemente iluminada deixam o relógio legível sobre a aura.
+        over(0, 0, 0, 0.9 * std::clamp(3.0 - distance, 0.0, 1.0));
+        over((3 * red + 255) / 4, (3 * green + 255) / 4, (3 * blue + 255) / 4,
+             std::clamp(1.8 - distance, 0.0, 1.0));
     }
     return image;
 }
