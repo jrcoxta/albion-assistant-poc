@@ -5,8 +5,6 @@
 #include <stdexcept>
 
 namespace {
-constexpr int padding = 6;
-
 LRESULT CALLBACK overlayProc(HWND window, UINT message, WPARAM w, LPARAM l) {
     // Extras defensivos: o click-through entre processos vem de LAYERED + TRANSPARENT.
     if (message == WM_NCHITTEST) return HTTRANSPARENT;
@@ -63,6 +61,7 @@ void Overlay::hide() {
 }
 
 bool Overlay::draw(int width, int height) {
+    const int padding=glow_?12:6;
     if (width_ != width || height_ != height) {
         BITMAPINFO info{};
         info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -86,7 +85,7 @@ bool Overlay::draw(int width, int height) {
         height_ = height;
         drawn_ = false;
     }
-    // A ROI sempre começa em (6,6); mudar sua posição não muda os pixels locais.
+    // O interior da área permanece transparente; brilho ocupa apenas sua margem.
     auto* pixels = static_cast<std::uint32_t*>(pixels_);
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
@@ -94,7 +93,8 @@ bool Overlay::draw(int width, int height) {
             if (y < edge) edge = y;
             if (width - 1 - x < edge) edge = width - 1 - x;
             if (height - 1 - y < edge) edge = height - 1 - y;
-            const unsigned alpha = edge < 2 ? 32u : edge < 4 ? 96u : edge < padding ? 255u : 0u;
+            const unsigned alpha = glow_ ? (edge < padding ? static_cast<unsigned>((edge+1)*(edge+1)*170/(padding*padding)) : 0u)
+                                         : edge < 2 ? 32u : edge < 4 ? 96u : edge < padding ? 255u : 0u;
             const unsigned red = (GetRValue(color_) * alpha + 127) / 255;
             const unsigned green = (GetGValue(color_) * alpha + 127) / 255;
             const unsigned blue = (GetBValue(color_) * alpha + 127) / 255;
@@ -105,6 +105,7 @@ bool Overlay::draw(int width, int height) {
 }
 
 void Overlay::update(HWND target, RECT icon, bool highlight) {
+    const int padding=glow_?12:6;
     if (!window_) return;
     if (!highlight || !IsWindow(target) || IsIconic(target) || !IsWindowVisible(target) ||
         GetForegroundWindow() != target) {

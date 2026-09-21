@@ -1,113 +1,176 @@
-// Exercita estado e persistência em janelas do próprio harness, sem usar o jogo.
-// Não valida aparência, foco real ou visibilidade da borda; estes exigem desktop desbloqueado.
-#include "../src/main.cpp"
+// Exercita somente janelas e arquivos do próprio teste; não interage com o jogo.
+#include "app.h"
+#include <objbase.h>
+#include "../resources/resource.h"
+#include <algorithm>
 #include <iostream>
+#include <stdexcept>
+#include <thread>
 
+using namespace aaapp;
 namespace {
-void require(bool value, const char* message) {
-    if (!value) throw std::runtime_error(message);
-}
-struct TestApp : App {
-    ~TestApp() {
-        stop();
-        if (badge) DestroyWindow(badge);
-        if (window) DestroyWindow(window);
-        if (target) DestroyWindow(target);
-        if (font) DeleteObject(font);
-        if (titleFont) DeleteObject(titleFont);
+void require(bool value,const char* message){if(!value)throw std::runtime_error(message);}
+struct TestApp:App {
+    ~TestApp(){
+        stop();if(window)DestroyWindow(window);if(target)DestroyWindow(target);window=nullptr;target=nullptr;
         std::error_code ignored;
         const auto resolved=std::filesystem::weakly_canonical(directory,ignored);
         const auto temporary=std::filesystem::weakly_canonical(std::filesystem::temp_directory_path(),ignored);
-        if(!ignored&&resolved.parent_path()==temporary&&resolved.filename().wstring().starts_with(L"albion-app-flow-"))
-            std::filesystem::remove_all(resolved,ignored);
+        if(!ignored&&resolved.parent_path()==temporary&&resolved.filename().wstring().starts_with(L"albion-app-flow-"))std::filesystem::remove_all(resolved,ignored);
     }
 };
+LRESULT CALLBACK testProc(HWND window,UINT message,WPARAM wp,LPARAM lp){
+    auto* app=reinterpret_cast<App*>(GetWindowLongPtrW(window,GWLP_USERDATA));
+    if(message==WM_NCCREATE){app=static_cast<App*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);SetWindowLongPtrW(window,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(app));}
+    if(message==WM_PAINT&&app){app->paint();return 0;}
+    return DefWindowProcW(window,message,wp,lp);
 }
-
-int main() {
-    try {
+void tab(App& app,int page){app.command(Tab0+page,BN_CLICKED);require(app.page==page,"navegação não mudou de página");}
+void choose(App& app,int id,int index,bool list=false){SendMessageW(app.item(id),list?LB_SETCURSEL:CB_SETCURSEL,index,0);app.command(id,list?LBN_SELCHANGE:CBN_SELCHANGE);}
+void confirmDeleteHud(App& app,int answer){
+    // Responde exclusivamente ao diálogo pertencente a esta janela/processo de teste.
+    const DWORD ownerThread=GetCurrentThreadId();std::atomic<bool> answered=false;
+    std::thread responder([&]{
+        const auto deadline=GetTickCount64()+4000;
+        while(GetTickCount64()<deadline&&!answered){
+            struct Context{HWND owner;int answer;bool handled=false;} context{app.window,answer};
+            EnumThreadWindows(ownerThread,[](HWND candidate,LPARAM lp)->BOOL{
+                auto& c=*reinterpret_cast<Context*>(lp);wchar_t type[64]{};GetClassNameW(candidate,type,64);
+                if(GetWindow(candidate,GW_OWNER)==c.owner&&std::wstring(type)==L"#32770"){
+                    PostMessageW(candidate,WM_COMMAND,c.answer,0);c.handled=true;return FALSE;
+                }return TRUE;
+            },reinterpret_cast<LPARAM>(&context));
+            if(context.handled){answered=true;break;}Sleep(10);
+        }
+    });
+    try{app.command(DeleteHud,BN_CLICKED);}catch(...){answered=true;responder.join();throw;}
+    responder.join();require(answered,"diálogo de exclusão da HUD não foi apresentado");
+}
+void screenshot(App& app,const std::filesystem::path& folder,const wchar_t* name){
+    if(folder.empty())return;
+    ShowWindow(app.window,SW_SHOWNOACTIVATE);UpdateWindow(app.window);
+    RECT bounds{};GetClientRect(app.window,&bounds);auto screen=GetDC(app.window);auto memory=CreateCompatibleDC(screen);
+    BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=bounds.right;info.bmiHeader.biHeight=-bounds.bottom;
+    info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;void* pixels=nullptr;
+    auto bitmap=CreateDIBSection(screen,&info,DIB_RGB_COLORS,&pixels,nullptr,0);auto old=SelectObject(memory,bitmap);
+    const bool printed=PrintWindow(app.window,memory,PW_CLIENTONLY)!=FALSE;GdiFlush();
+    aa::Image image;image.width=bounds.right;image.height=bounds.bottom;
+    image.bgra.assign(static_cast<const std::uint8_t*>(pixels),static_cast<const std::uint8_t*>(pixels)+static_cast<std::size_t>(image.width)*image.height*4);
+    for(std::size_t i=3;i<image.bgra.size();i+=4)image.bgra[i]=255;
+    SelectObject(memory,old);DeleteObject(bitmap);DeleteDC(memory);ReleaseDC(app.window,screen);ShowWindow(app.window,SW_HIDE);
+    require(printed,"renderização de teste indisponível");std::filesystem::create_directories(folder);aa::saveImage(image,folder/name);
+}
+}
+int wmain(int argc,wchar_t** argv){
+    const auto com=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);
+    struct ComEnd{HRESULT hr;~ComEnd(){if(SUCCEEDED(hr))CoUninitialize();}} cleanup{com};
+    try{
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-        TestApp app;
-        app.instance=GetModuleHandleW(nullptr);
-        const auto dataDirectory=std::filesystem::temp_directory_path()/
-            (L"albion-app-flow-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64()));
-        app.configureStorage(dataDirectory/L"personalizado.ini");
-        require(app.directory==dataDirectory&&app.profilesDir==dataDirectory/L"hud-profiles"&&
-                std::filesystem::is_directory(dataDirectory),
-            "arquivo de configuração explícito não isolou todos os dados na pasta escolhida");
-        app.settings.hudName=L"Notebook";
-        app.settings.referencePath=L"referencia-de-teste.png";
-        app.settings.rule.color=RGB(40,255,120);
-        app.settings.rule.stacks=2;
-        app.persist();
-        auto monitor=app.settings;monitor.hudName=L"Monitor 34";monitor.rule.stacks=3;
-        aa::saveHudProfile(app.profilesDir,monitor);
+        TestApp app;app.instance=GetModuleHandleW(nullptr);
+        const auto folder=std::filesystem::temp_directory_path()/(L"albion-app-flow-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64()));
+        app.configureStorage(folder/L"personalizado.ini");
+        require(app.workspacePath==folder/L"personalizado-workspace.ini"&&app.directory==folder,"dados de teste não isolados");
+        aa::Workspace w;w.nextId=100;
+        aa::HudLayout notebook;notebook.id=L"h1";notebook.name=L"Notebook";notebook.clientWidth=800;notebook.clientHeight=600;
+        notebook.areas={{L"Meus status",{20,20,250,60},48,true},{L"Habilidade E",{300,400,64,64},48,false}};
+        auto large=notebook;large.id=L"h2";large.name=L"Monitor 34";large.areas[0].region.x=80;
+        w.huds={notebook,large};w.activeHudId=L"h1";
+        w.statuses={{L"s1",L"Espírito Assassino",false,true,{},{}},{L"s2",L"Veneno",true,false,{},{}}};
+        aa::StatusRule rule;rule.id=L"r1";rule.statusId=L"s1";rule.sourceArea=L"Meus status";rule.targetArea=L"Habilidade E";
+        rule.condition.name=L"Preparar golpe";rule.condition.condition=aa::Condition::StacksEqual;rule.condition.stacks=3;
+        w.sets={{L"set1",L"Adagas",{rule}},{L"set2",L"Cajado",{}}};w.activeSetId=L"set1";
+        app.commit(w);app.selectedStatusId=L"s1";
+        WNDCLASSW cls{};cls.hInstance=app.instance;cls.lpfnWndProc=testProc;cls.lpszClassName=L"AlbionAppFlowTests";cls.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_BTNFACE+1);RegisterClassW(&cls);
+        app.window=CreateWindowExW(0,cls.lpszClassName,L"Validação do painel",WS_OVERLAPPED|WS_CAPTION,20,20,880,740,nullptr,nullptr,app.instance,&app);
+        app.target=CreateWindowExW(0,L"STATIC",L"Alvo do teste",WS_POPUP,0,0,800,600,nullptr,nullptr,app.instance,nullptr);
+        require(app.window&&app.target,"janelas de teste não criadas");app.makeUI();
+        const auto pictures=argc>1?std::filesystem::absolute(argv[1]):std::filesystem::path{};
+        require(app.item(Start)&&!app.item(RuleName)&&!app.item(StatusName)&&!app.item(AreaName),"Monitor mistura editores");
+        screenshot(app,pictures,L"ui-monitor.png");
+        choose(app,HudList,1);require(app.workspace.activeHudId==L"h2"&&app.workspace.activeSetId==L"set1"&&app.set()->rules[0].condition.stacks==3,"troca de HUD alterou o set");
+        choose(app,SetList,1);require(app.workspace.activeHudId==L"h2"&&app.workspace.activeSetId==L"set2","troca de set alterou a HUD");choose(app,SetList,0);
 
-        app.window=CreateWindowExW(0,L"STATIC",L"Harness do painel",WS_OVERLAPPED|WS_CAPTION,
-            20,20,880,740,nullptr,nullptr,app.instance,nullptr);
-        app.target=CreateWindowExW(0,L"STATIC",L"Alvo simulado",WS_POPUP,
-            0,0,800,600,nullptr,nullptr,app.instance,nullptr);
-        require(app.window&&app.target,"janelas do harness não criadas");
-        app.overlay.initialize(app.instance);
-        app.makeUI();
+        tab(app,1);require(app.item(DeleteHud)&&app.item(AreaName)&&!app.item(RuleName)&&!app.item(CaptureStatus),"HUD mistura regras ou status");
+        screenshot(app,pictures,L"ui-huds.png");
+        SetWindowTextW(app.item(HudName),L"Ultrawide");tab(app,2);require(app.hud()->name==L"Ultrawide","navegação perdeu nome da HUD");
+        require(app.item(StatusName)&&app.item(CaptureStack)&&!app.item(HudName)&&!app.item(RuleName),"Status mistura outros editores");
+        SetWindowTextW(app.item(StatusName),L"");app.rebuildUIWithDraft();require(text(app.item(StatusName)).empty()&&app.selectedStatus()->name==L"Espírito Assassino","DPI perdeu rascunho ou gravou texto inválido");
+        SetWindowTextW(app.item(StatusName),L"Carga da adaga");tab(app,3);require(app.workspace.statuses[0].name==L"Carga da adaga"&&app.rule()->statusId==L"s1","renomear status quebrou vínculo");
+        require(app.item(RuleName)&&!app.item(StatusName)&&!app.item(HudName),"Regras misturam outros editores");
+        require(SendMessageW(app.item(ConditionBox),CB_GETCURSEL,0,0)==2&&text(app.item(Stacks))==L"3","condição ou stack incorreto na edição");
+        screenshot(app,pictures,L"ui-regras.png");
+        choose(app,RuleStatus,1);require(SendMessageW(app.item(Stacks),CB_GETCOUNT,0,0)==0,"status personalizado herdou contadores do exemplo");
+        tab(app,2);require(app.set()->rules[0].statusId==L"s2"&&app.set()->rules[0].condition.stacks==3,"rascunho sem amostra impediu navegação ou mudou valor");
+        require(!aa::readinessIssues(app.workspace).empty(),"regra sem referência ficou pronta");
+        choose(app,StatusList,1,true);
+        bool blocked=false;try{app.command(DeleteStatus,BN_CLICKED);}catch(const std::invalid_argument&){blocked=true;}require(blocked&&app.workspace.statuses.size()==2,"exclusão removeu status usado");
+        app.error.clear();
+        auto custom=app.workspace;custom.statuses[1].referencePath=app.storeImage(L"s2",aa::loadImageResource(IDR_ASSASSIN_NONE));
+        custom.statuses[1].stacks={{5,app.storeImage(L"s2",aa::loadImageResource(IDR_ASSASSIN_3))}};
+        app.commit(custom);app.makeUI();screenshot(app,pictures,L"ui-status.png");
+        auto presenceReader=aa::MonitorReader{app.workspace.statuses[1],app.hud()->areas[0],false};
+        presenceReader.status.stacks[0].path=L"Z:\\amostra-ausente-de-teste.png";
+        const auto presenceOnly=makeRecognizer(presenceReader);
+        const auto reference=aa::loadImageResource(IDR_ASSASSIN_NONE);
+        require(presenceOnly->recognize(reference,reference.width).presence==aa::Presence::Present,"presença exigiu amostra de stacks ausente");
+        presenceReader.needsStacks=true;blocked=false;
+        try{(void)makeRecognizer(presenceReader);}catch(const std::exception&){blocked=true;}require(blocked,"contador sem amostra iniciou");
+        presenceReader.needsStacks=false;presenceReader.status.referencePath=(app.directory/L"oversized.png").wstring();
+        aa::saveImage({512,512,std::vector<std::uint8_t>(512*512*4,30)},presenceReader.status.referencePath);
+        blocked=false;try{(void)makeRecognizer(presenceReader);}catch(const std::exception& error){blocked=std::string(error.what()).find("Veneno")!=std::string::npos;}
+        require(blocked,"referência fora do limite não bloqueou início com nome do status");
+        {
+            // Dois símbolos distintos presentes na mesma ROI; remover um não deve apagar o outro.
+            const auto food=aa::loadImage(std::filesystem::path(__FILE__).parent_path().parent_path()/L"assets"/L"other-food.png");
+            aa::Workspace multi;multi.activeHudId=L"hud";multi.activeSetId=L"set";
+            multi.huds={{L"hud",L"Teste visual",300,200,0,L"",{{L"Status",{0,0,160,80},64,true},{L"A",{0,100,40,40},48,false},{L"B",{60,100,40,40},48,false}}}};
+            multi.statuses={{L"a",L"Carga",false,true,{},{}},{L"b",L"Comida",false,false,app.storeImage(L"food",food),{}}};
+            auto first=rule;first.id=L"first";first.statusId=L"a";first.sourceArea=L"Status";first.targetArea=L"A";first.condition.condition=aa::Condition::Present;
+            auto second=first;second.id=L"second";second.statusId=L"b";second.targetArea=L"B";second.condition.name=L"Comida presente";
+            multi.sets={{L"set",L"Dois status",{first,second}}};const auto plan=aa::makeMonitorPlan(multi);
+            const auto a=makeRecognizer(plan.readers[0]),b=makeRecognizer(plan.readers[1]);
+            aa::Image roi{160,80,std::vector<std::uint8_t>(160*80*4,24)};
+            const auto place=[&](const aa::Image& icon,int left){
+                for(int y=0;y<64;++y)for(int x=0;x<64;++x){
+                    const auto from=(static_cast<std::size_t>(y*icon.height/64)*icon.width+x*icon.width/64)*4;
+                    std::copy_n(icon.bgra.data()+from,4,roi.bgra.data()+(static_cast<std::size_t>(y+8)*160+x+left)*4);
+                }
+            };
+            place(reference,4);place(food,90);
+            auto observe=[&]{return std::vector<aa::Observation>{{a->recognize(roi,64),1000,11},{b->recognize(roi,64),1000,11}};};
+            auto observations=observe();require(aa::evaluateMonitor(plan,observations,1000,750,11)==std::vector<bool>({true,true}),"duas identidades distintas não acionaram suas ações");
+            for(int y=0;y<80;++y)std::fill_n(roi.bgra.data()+static_cast<std::size_t>(y)*160*4,80*4,std::uint8_t{24});
+            observations=observe();require(aa::evaluateMonitor(plan,observations,1000,750,11)==std::vector<bool>({false,true}),"retirar um status interferiu na leitura do outro");
+        }
+        tab(app,3);require(SendMessageW(app.item(Stacks),CB_GETCOUNT,0,0)==1&&SendMessageW(app.item(Stacks),CB_GETCURSEL,0,0)==CB_ERR,"amostra nova substituiu valor salvo silenciosamente");
+        choose(app,Stacks,0);choose(app,EffectBox,1);app.saveEditor();require(app.rule()->condition.stacks==5&&app.rule()->glow,"regra não salvou contador genérico e brilho");
+        choose(app,ConditionBox,0);app.saveEditor();require(app.rule()->condition.condition==aa::Condition::Present&&!IsWindowEnabled(app.item(Stacks)),"presença usa contador");
+        choose(app,ConditionBox,1);app.saveEditor();require(app.rule()->condition.condition==aa::Condition::Absent,"ausência mapeada incorretamente");
+        app.command(NewRule,BN_CLICKED);app.command(NewRule,BN_CLICKED);require(app.set()->rules.size()==3&&app.set()->rules[1].condition.name!=app.set()->rules[2].condition.name,"novas regras colidem");
+        app.command(MoveRuleUp,BN_CLICKED);require(app.selectedRule==1,"prioridade não mudou");app.command(DeleteRule,BN_CLICKED);require(app.set()->rules.size()==2,"regra não removida");
 
-        SetWindowTextW(app.item(Stacks),L"");
-        SendMessageW(app.item(Color),CB_SETCURSEL,3,0);
-        app.rebuildUIWithDraft();
-        require(text(app.item(Stacks)).empty()&&SendMessageW(app.item(Color),CB_GETCURSEL,0,0)==3,
-            "reconstrução por DPI validou ou descartou edição incompleta");
-        SendMessageW(app.item(ConditionBox),CB_SETCURSEL,static_cast<WPARAM>(aa::Condition::Present),0);
-        app.readEditor();
-        require(app.settings.rule.condition==aa::Condition::Present,"presença tentou validar contador desabilitado");
-        SendMessageW(app.item(ConditionBox),CB_SETCURSEL,static_cast<WPARAM>(aa::Condition::StacksEqual),0);
-        SetWindowTextW(app.item(Stacks),L"2");
+        tab(app,1);app.command(NewHud,BN_CLICKED);require(app.hud()->areas.empty()&&app.hud()->clientWidth==0&&app.workspace.statuses.size()==2&&app.set()->rules.size()==2,"nova HUD copiou tela ou alterou biblioteca/set");
+        const auto created=app.workspace.activeHudId;confirmDeleteHud(app,IDNO);require(app.workspace.activeHudId==created&&app.workspace.huds.size()==3,"cancelamento excluiu HUD");
+        confirmDeleteHud(app,IDYES);require(app.workspace.huds.size()==2&&app.workspace.activeHudId!=created&&app.workspace.statuses.size()==2&&app.set()->rules.size()==2,"excluir HUD alterou biblioteca/set");
+        choose(app,HudList,0);tab(app,3);app.selectedRule=0;app.makeUI();
+        const auto screen=screenOf(app.target);app.hud()->monitorDpi=screen.dpi;app.hud()->monitorDevice=screen.device;
+        app.current={{{aa::Presence::Present,3,1.0f,{},{}},static_cast<std::int64_t>(GetTickCount64()),app.source}};
+        app.latest=app.current;app.pending=true;app.running=true;const auto oldSource=app.source;
+        app.testAction();require(!app.running&&app.source>oldSource&&!app.pending&&app.current.empty()&&app.latest.empty(),"teste visual preservou leitura anterior");
+        require(app.previewUntil>GetTickCount64()&&app.previewUntil<=GetTickCount64()+5000,"teste visual sem limite de cinco segundos");
+        app.previewUntil=GetTickCount64()-1;app.updateHighlight();require(app.previewUntil==0&&!app.running,"teste expirado reiniciou leitura");
+        app.previewUntil=GetTickCount64()+5000;app.stop();require(app.previewUntil==0,"Parar não encerrou teste visual");
 
-        SetWindowTextW(app.item(HudName),L"Monitor 34");
-        SetWindowTextW(app.item(Stacks),L"2");
-        for(std::size_t i=0;i<app.profiles.size();++i)
-            if(app.profiles[i].settings.hudName==L"Monitor 34")
-                SendMessageW(app.item(HudList),CB_SETCURSEL,i,0);
-        app.loadHud();
-        require(app.settings.rule.stacks==3,"Carregar salvou edições sobre a HUD escolhida");
-        require(aa::loadSettings((app.profilesDir/L"Notebook.ini").wstring()).rule.stacks==2,
-            "Carregar alterou outra HUD");
-
-        SetWindowTextW(app.item(HudName),L"Notebook");
-        app.readEditor();
-        bool rejected=false;
-        try { app.persist(); } catch(const std::invalid_argument&) { rejected=true; }
-        require(rejected,"renomear sobrescreveu uma HUD alheia");
-        app.newHud();
-        require(app.settings.referencePath==L"referencia-de-teste.png"&&app.settings.rule.stacks==3,
-            "Nova HUD perdeu a ação ou referência salva");
-        require(!app.settings.buffs.valid()&&!app.settings.highlight.valid()&&!app.settings.iconCalibrated,
-            "Nova HUD reutilizou coordenadas anteriores");
-
-        const auto screen=screenOf(app.target);
-        app.settings.clientWidth=screen.width;app.settings.clientHeight=screen.height;
-        app.settings.monitorDevice=screen.device;app.settings.monitorDpi=screen.dpi;
-        app.settings.highlight={20,20,80,80};
-        app.current={{aa::Presence::Present,3,1.0f,{},{}},static_cast<std::int64_t>(GetTickCount64()),app.source};
-        app.latest=app.current;app.pending=true;app.running=true;
-        const auto oldSource=app.source;
-        app.testHighlight();
-        require(!app.running&&app.source>oldSource&&!app.pending,
-            "teste visual não encerrou a sessão de leitura");
-        require(app.current.detection.presence==aa::Presence::Unknown&&app.latest.source==0,
-            "teste visual deixou uma observação anterior ou sintética");
-        require(app.previewUntil>GetTickCount64()&&app.previewUntil<=GetTickCount64()+5000,
-            "demonstração não está limitada a cinco segundos");
-        app.previewUntil=GetTickCount64()-1;
-        app.updateHighlight();
-        require(app.previewUntil==0&&!app.running&&!app.lit,
-            "demonstração vencida não encerrou ou iniciou leitura implicitamente");
-        app.previewUntil=GetTickCount64()+5000;
-        app.stop();
-        require(app.previewUntil==0,"Parar não cancelou demonstração");
-        std::cout << "Estado dos fluxos de carregar, nova HUD, DPI, colisão de nome e teste do destaque aprovado (sem validação visual)\n";
-        return 0;
-    } catch(const std::exception& error) {
-        std::cerr << error.what() << '\n';
-        return 1;
-    }
+        auto emptyHud=app.workspace;while(!emptyHud.huds.empty())aa::eraseHud(emptyHud,emptyHud.huds.front().id);app.commit(emptyHud);app.load();
+        require(app.workspace.huds.empty()&&app.workspace.activeHudId.empty()&&app.workspace.sets.size()==2,"última HUD reapareceu ou excluiu sets");
+        {
+            TestApp imported;imported.configureStorage(folder/L"legacy"/L"settings.ini");
+            aa::Settings legacy;legacy.referencePath=app.workspace.statuses[1].referencePath;legacy.rule.stacks=3;
+            aa::saveSettings(imported.settingsPath.wstring(),legacy);imported.load();
+            require(imported.workspace.statuses.size()==1&&!imported.workspace.statuses[0].builtinAssassin&&aa::stackValues(imported.workspace.statuses[0])==std::vector<unsigned>({2,3}),"migração não materializou amostras de contadores legados");
+            for(const auto& sample:imported.workspace.statuses[0].stacks)require(aa::loadImage(sample.path).valid(),"amostra legada não gravada");
+            imported.load();require(imported.workspace.statuses[0].stacks.size()==2,"migração repetida duplicou amostras");
+        }
+        std::cout<<"Fluxos de quatro páginas, CRUD, cancelamento, persistência, contadores genéricos, DPI e teste temporário aprovados; sem teste em jogo.\n";return 0;
+    }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

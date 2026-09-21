@@ -6,6 +6,9 @@
 #include <limits>
 namespace aa {
 namespace {
+bool validReference(const Image& image) {
+    return image.valid() && image.width>=24 && image.height>=24 && image.width<=256 && image.height<=256;
+}
 struct Color { float b,g,r; };
 Color color(const Image& image,int x,int y) {
     const auto* p=image.bgra.data()+(std::size_t(y)*image.width+x)*4;
@@ -18,6 +21,13 @@ bool white(const Image& image,int x,int y) {
     const auto* p=image.bgra.data()+(std::size_t(y)*image.width+x)*4;
     const auto lo=std::min({p[0],p[1],p[2]}),hi=std::max({p[0],p[1],p[2]});
     return lo>125 && lo>hi*.78f;
+}
+bool hasCounterInk(const Image& image) {
+    // O aro branco do ícone não basta: exigir tinta também no interior do contador.
+    int ink=0;
+    for(int y=image.height*49/100;y<image.height*80/100;++y)
+        for(int x=image.width*53/100;x<image.width*80/100;++x) ink+=white(image,x,y);
+    return ink>=std::max(3,image.width*image.height/200);
 }
 float digitScore(const Image& roi,Region icon,const Image& reference) {
     float best=0;
@@ -46,13 +56,26 @@ Recognizer::Recognizer(const std::filesystem::path& assetsDir) {
         return assetsDir.empty()?loadImageResource(id):loadImage(assetsDir/name);
     };
     references_.push_back(load(L"assassin-none.png",IDR_ASSASSIN_NONE));
-    digits_.push_back(load(L"assassin-2.png",IDR_ASSASSIN_2));
-    digits_.push_back(load(L"assassin-3.png",IDR_ASSASSIN_3));
-    references_.insert(references_.end(),digits_.begin(),digits_.end());
+    stackReferences_.push_back({2,load(L"assassin-2.png",IDR_ASSASSIN_2)});
+    stackReferences_.push_back({3,load(L"assassin-3.png",IDR_ASSASSIN_3)});
+    for(const auto& reference:stackReferences_) references_.push_back(reference.image);
 }
 void Recognizer::setReference(const Image& image) {
     references_.clear();
-    if(image.valid() && image.width>=24 && image.height>=24) references_.push_back(image);
+    clearStackReferences();
+    if(validReference(image)) references_.push_back(image);
+}
+void Recognizer::clearStackReferences() {
+    stackReferences_.clear();
+}
+bool Recognizer::setStackReference(unsigned value,const Image& image) {
+    if(value<1 || value>99 || !validReference(image) || !hasCounterInk(image)) return false;
+    for(auto& reference:stackReferences_) if(reference.value==value) {
+        reference.image=image;
+        return true;
+    }
+    stackReferences_.push_back({value,image});
+    return true;
 }
 Detection Recognizer::recognize(const Image& image,int iconSize) const {
     Detection out;
@@ -130,10 +153,18 @@ Detection Recognizer::recognize(const Image& image,int iconSize) const {
     }
     out.presence=Presence::Present;
     out.icon={best.x,best.y,iconSize,iconSize};
-    if(digits_.size()==2) {
-        const float two=digitScore(image,out.icon,digits_[0]),three=digitScore(image,out.icon,digits_[1]);
-        if(std::max(two,three)>.64f && std::abs(two-three)>.065f) out.stacks=two>three?2u:3u;
+    float bestScore=0,secondScore=0;
+    unsigned bestValue=0;
+    for(const auto& reference:stackReferences_) {
+        const float score=digitScore(image,out.icon,reference.image);
+        if(score>bestScore) {
+            secondScore=bestScore;
+            bestScore=score;
+            bestValue=reference.value;
+        } else secondScore=std::max(secondScore,score);
     }
+    // A margem entre classes não protege quando o número observado não foi cadastrado.
+    if(bestScore>.80f && bestScore-secondScore>.065f) out.stacks=bestValue;
     out.detail=out.stacks?"Buff e contador reconhecidos":"Buff presente; contador desconhecido";
     return out;
 }

@@ -10,7 +10,7 @@ bool evaluate(const Rule& rule, const Observation& observation, std::int64_t now
     const auto& detection = observation.detection;
     switch (rule.condition) {
     case Condition::StacksEqual:
-        return detection.presence == Presence::Present && rule.stacks <= 4 &&
+        return detection.presence == Presence::Present && rule.stacks >= 1 && rule.stacks <= 99 &&
                detection.stacks && *detection.stacks == rule.stacks;
     case Condition::Present:
         return detection.presence == Presence::Present;

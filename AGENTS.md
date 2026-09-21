@@ -4,7 +4,7 @@
 - Um aplicativo, um checkout ativo e uma entrega: dist/AlbionAssistant.exe. Histórico no Git; não criar launchers, pacotes ou pastas v1/v2/Guided nem cópias paralelas do produto.
 - Usuário aprovou implementação autônoma e orquestração via OpenCode. Não parar para aprovar decisões reversíveis.
 - Produto apenas captura externa e sinalização visual. Não ler memória, injetar, interceptar rede nem automatizar gameplay no aplicativo.
-- Regra configurável: Espírito Assassino com exatamente 3 stacks destaca área selecionada de Golpe Fantasma; desconhecido/expirado/fonte inválida sempre apaga. Sem número visível é stacks desconhecido, não inferir 1.
+- HUD guarda tela e regiões; biblioteca guarda status; sets guardam várias regras. Regras genéricas de presença/ausência/stacks acionam borda ou brilho. Espírito Assassino com 3 stacks é exemplo e regressão existente. Desconhecido/expirado/fonte inválida sempre apaga; sem número visível é stacks desconhecido, não inferir 1. Novos status não herdam contadores do exemplo.
 - Usuário descartou o vídeo do fluxo. Usar prints fornecidos e jogo aberto. Não apagar vídeo.
 - Seleção de região por dois cliques separados, sem exigir arraste. Posições relativas à área cliente e calibração explícita por tamanho/HUD.
 - Captura orientada a frames disponíveis, sem limite fixo 30/60 e sem fila crescente. Download somente ROI. Não alegar velocidade ou precisão sem medidas.

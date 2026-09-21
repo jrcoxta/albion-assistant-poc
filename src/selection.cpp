@@ -216,7 +216,7 @@ struct SelectorState {
             if (kind == SelectionKind::Icon)
                 updateStatus(L"O ícone deve formar um quadrado de 24 a 256 px. Selecione novamente.");
             else if (kind == SelectionKind::Buffs)
-                updateStatus(L"A área dos buffs precisa comportar pelo menos um ícone. Selecione novamente.");
+                updateStatus(L"A área de leitura precisa comportar pelo menos um ícone. Selecione novamente.");
             else
                 updateStatus(L"A área é pequena demais. Selecione novamente.");
             return;
@@ -642,9 +642,9 @@ std::optional<Region> selectRegion(HWND owner,
     state.recognizer = recognizer;
     state.origin = origin;
     state.kind = kind;
-    state.manual = kind != SelectionKind::Icon;
+    state.manual = kind != SelectionKind::Icon || !recognizer;
     state.cursor = {snapshot.width / 2, snapshot.height / 2};
-    if (kind == SelectionKind::Icon)
+    if (kind == SelectionKind::Icon && recognizer)
         state.status = L"Clique no ícone para buscar automaticamente. M: ajuste manual · Esc: cancelar.";
     else
         state.status = L"Clique no primeiro canto. Depois, clique no canto oposto.";

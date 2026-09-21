@@ -27,8 +27,8 @@ void ruleTests() {
     for (unsigned wanted = 0; wanted <= 4; ++wanted) {
         rule.stacks = wanted;
         for (unsigned observed = 0; observed <= 4; ++observed)
-            check(aa::evaluate(rule, present(observed), 1000, 750, 7) == (wanted == observed),
-                  "stacks compara igualdade em todo o intervalo 0..4");
+            check(aa::evaluate(rule, present(observed), 1000, 750, 7) == (wanted > 0 && wanted == observed),
+                  "stacks compara igualdade e rejeita contador zero");
     }
     rule.stacks = 3;
     auto reading = present();
@@ -76,7 +76,11 @@ void ruleTests() {
     check(!aa::evaluate(rule, present(), 1000, 750, 7), "condicao invalida nao aciona");
     rule.condition = aa::Condition::StacksEqual;
     rule.stacks = 5;
-    check(!aa::evaluate(rule, present(5), 1000, 750, 7), "contador fora de 0..4 nao aciona");
+    check(aa::evaluate(rule, present(5), 1000, 750, 7), "contador generico 5 aciona");
+    rule.stacks = 99;
+    check(aa::evaluate(rule, present(99), 1000, 750, 7), "contador generico 99 aciona");
+    rule.stacks = 100;
+    check(!aa::evaluate(rule, present(100), 1000, 750, 7), "contador fora de 1..99 nao aciona");
 }
 
 struct TemporaryIni {

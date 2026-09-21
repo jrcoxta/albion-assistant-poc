@@ -1,27 +1,32 @@
 # Albion Assistant
 
-Aplicativo Windows x64 que destaca uma região da HUD quando Espírito Assassino chega a **3 stacks**. Captura a imagem visível do jogo e exibe uma borda sobre Golpe Fantasma; não envia teclas de combate.
+Aplicativo Windows x64 para acompanhar buffs/debuffs pela imagem do jogo e destacar áreas conforme regras configuráveis. HUDs guardam a configuração da tela; sets guardam as regras; status ficam em uma biblioteca compartilhada. O exemplo de Espírito Assassino com 3 stacks continua disponível.
 
 ## Executar
 
 Abra **`dist/AlbionAssistant.exe`**. É o único arquivo necessário para usar o programa: ícone, manifesto, informações de versão e referências de reconhecimento estão embutidos, com runtime C++ estático. Não precisa de launcher, pasta de imagens ou terminal. Abrir novamente traz a instância existente para frente.
 
-1. Abra o Albion em janela ou janela sem bordas. Em **Conectar**, conecte ao jogo e escolha uma HUD salva ou **Nova HUD**.
-2. Em **Selecionar**, marque dois cantos da região dos buffs. Com Espírito Assassino visível, aponte o ícone e confira a prévia. **Ajustar manual** ou M permite dois cliques; o tamanho é obtido do recorte. Marque também a área de Golpe Fantasma. Confirme cada seleção; Esc cancela e F2 move o painel para liberar a área coberta.
-3. Em **Criar ação**, confira a condição, a cor e **Regra ativa**.
-4. Em **Conferir e usar**, **Testar destaque** mostra uma demonstração por cinco segundos, com aviso TESTE. Depois, **Iniciar leitura** usa a regra real.
+1. Abra o Albion em janela ou janela sem bordas. Em **Monitor → Conectar ao jogo**, conecte à janela.
+2. Em **HUDs**, escolha uma HUD ou crie outra. Adicione áreas com nomes claros, como “Meus status” e “Habilidade E”. Em **Selecionar área**, marque dois cantos por cliques separados e confirme. Nas áreas usadas para leitura, **Calibrar tamanho do ícone** pede um recorte justo de um ícone inteiro. Esc cancela; F2 move o painel de seleção.
+3. Em **Status → Novo status**, dê um nome e indique buff ou debuff. **Capturar referência** permite selecionar o ícone do jogo; **Importar imagem** aceita um recorte existente. Para regras de contagem, digite o valor e **Capture uma amostra** quando esse número estiver visível. Cadastre cada contagem que deseja usar. Presença e ausência dispensam essas amostras.
+4. Em **Sets e regras**, crie um set e suas regras. Escolha o status, a área onde ele aparece, a condição (presente, ausente ou quantidade exata de stacks), a área de destino, borda/brilho e cor. A frase abaixo dos campos resume a ação. Você pode reordenar ou desativar regras.
+5. **Testar destaque por 5 s** mostra somente a ação, com aviso TESTE e leitura pausada. Depois, em **Monitor**, escolha HUD e set e use **Iniciar leitura**. O painel mostra cada leitura e o estado das ações.
 
 F8 abre o painel; F9 inicia ou para a leitura. O destaque apaga quando o jogo perde foco ou a informação fica incerta/expirada. O padrão de validade é 750 ms.
 
 ## Dados e telas
 
-As configurações ficam em **`%LOCALAPPDATA%\AlbionAssistant`**: `settings.ini`, `hud-profiles`, `samples` e diagnósticos quando ativados. Atualizar o EXE ou limpar o build não altera esses dados. O parâmetro opcional `--settings caminho.ini` usa uma configuração e pasta de dados explícitas.
+As configurações ficam em **`%LOCALAPPDATA%\AlbionAssistant`**: `workspace.ini`, imagens em `status-images` e diagnósticos quando ativados. Atualizar o EXE ou limpar o build não altera esses dados. O parâmetro opcional `--settings caminho.ini` isola o workspace e as imagens na pasta escolhida.
+
+Na primeira abertura, `settings.ini` e `hud-profiles` da versão anterior são importados automaticamente, sem alterar os originais. HUDs e regras divergentes são preservadas separadamente. Os contadores 2/3 que a configuração anterior usava são mantidos como amostras explícitas dos status importados. Cadastros novos não herdam essas amostras. Depois de criado `workspace.ini`, a importação não se repete; excluir a última HUD não a faz reaparecer.
 
 Quem ainda tiver dados de um build antigo ao lado do EXE deve fechar o aplicativo e copiar `settings.ini`, `hud-profiles` e as referências personalizadas para a pasta de dados antes de usar o executável atual. Não sobrescreva arquivos/perfis já existentes: preserve os originais e confira as referências pelo painel. Não há importação automática de pastas antigas. Os dados deste ambiente já foram migrados durante a consolidação.
 
-Salve uma HUD para cada resolução/layout, por exemplo “Notebook” e “Monitor 34”. Os perfis guardam posições, tamanho do ícone, resolução, monitor e DPI conhecidos. O programa sugere uma configuração compatível; você escolhe qual carregar. Calibrar outro ambiente preserva o perfil salvo anterior. A mudança de layout dentro do jogo exige nova seleção ou troca manual do perfil.
+Salve uma HUD para cada resolução/layout, por exemplo “Notebook” e “Monitor 34”. HUDs guardam posições, tamanho dos ícones, resolução, monitor e DPI conhecidos. A mudança de layout dentro do jogo exige nova seleção ou troca manual de HUD. Uma tela incompatível apaga os destaques e exige a escolha da HUD correspondente.
 
-Use **Salvar HUD e ação** antes de carregar outra HUD ou criar uma nova para conservar edições. Carregar restaura a versão salva. Nova HUD mantém a última ação e referência salvas e inicia outra calibração. Um nome já utilizado por outra HUD não pode sobrescrevê-la.
+Use os mesmos nomes de áreas em HUDs diferentes para reutilizar um set. Trocar de set mantém a HUD; trocar de HUD mantém o set. Renomear uma área exige atualizar as regras que a referenciam. Dependências ausentes são mostradas no Monitor e bloqueiam a leitura, em vez de ignorar regras silenciosamente.
+
+As edições são salvas antes de trocar de página ou seleção; há também botões de salvar. **Excluir HUD** remove apenas a HUD e suas áreas, após confirmação. **Excluir set** remove suas regras e preserva a biblioteca. Um status utilizado por regras precisa ser desvinculado antes da exclusão. As amostras embutidas do exemplo 2/3 são fixas; capture outra referência para substituí-las por amostras próprias.
 
 ## Desenvolvimento
 
@@ -54,8 +59,12 @@ Os presets `windows-release` e `windows-debug` em `CMakePresets.json` também po
 
 ## Limites da POC
 
-Há uma regra por HUD, com condições de presença, ausência ou stacks **2/3**. Contador ilegível permanece desconhecido; não inferimos 1. O relógio radial é uma variação visual, sem cálculo de segundos restantes. **Avançado → Outra referência** troca a identidade do ícone, mantendo os dígitos desse preset; isso não é reconhecimento universal de buffs.
+Cada set aceita até 32 regras; cada HUD, até 32 áreas. A biblioteca aceita até 64 status e amostras rotuladas de **1 a 99 stacks**. Esses números são rótulos de imagens cadastradas, não OCR universal: o usuário precisa capturar o contador visível. A leitura espera ícones com contador branco no canto inferior direito, como nas amostras do Albion. Recortes têm entre 24 e 256 pixels. Contador ilegível permanece desconhecido; ausência de número não significa 1. O relógio radial é tratado como variação visual, sem cálculo de segundos restantes.
+
+Vários status são acompanhados no mesmo ciclo; regras do mesmo status na mesma área compartilham a leitura. Cada ação usa sua própria condição. Se duas regras verdadeiras usam a mesma área de destino, vence a primeira na lista. O brilho é uma margem suave e estática ao redor da área selecionada.
+
+O cadastro é genérico, mas a precisão depende do recorte e da aparência do status. Ícones muito semelhantes ou monocromáticos precisam de validação específica; o conjunto inteiro de habilidades do jogo ainda não foi testado.
 
 A captura usa DXGI e frames disponíveis, sem limitador fixo de 30/60 FPS nem fila crescente. Precisa de sessão Windows desbloqueada e jogo visível. Tela cheia exclusiva, HDR, monitor girado e janela distribuída entre monitores ainda não foram validados. Não há leitura de memória do jogo, injeção, interceptação de rede nem login automático.
 
-`--diagnostics` grava mudanças de estado e amostras na pasta de dados. `--diagnostics --show-overlay-in-capture` inclui a borda na captura para inspeção; exige áreas de leitura e destaque separadas. As evidências e pendências estão em [docs/validacao.md](docs/validacao.md).
+`--diagnostics` grava mudanças dos estados das ações na pasta de dados. `--diagnostics --show-overlay-in-capture` inclui os destaques na captura para inspeção; exige áreas de leitura e destaque separadas. As evidências e pendências estão em [docs/validacao.md](docs/validacao.md).

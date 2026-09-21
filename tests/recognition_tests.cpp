@@ -27,6 +27,70 @@ aa::Image place(const aa::Image& source, int width, int height, int left, int to
         out.bgra.data()+(std::size_t(top+y)*width+left)*4);
     return out;
 }
+aa::Image genericStatus() {
+    aa::Image out{64,64,std::vector<std::uint8_t>(64*64*4,255)};
+    for(int y=0;y<64;++y) for(int x=0;x<64;++x) {
+        auto* pixel=out.bgra.data()+(std::size_t(y)*64+x)*4;
+        pixel[0]=static_cast<std::uint8_t>(20+(x/8)%2*25);
+        pixel[1]=static_cast<std::uint8_t>(70+(y/8)%3*30);
+        pixel[2]=static_cast<std::uint8_t>(25+(x*3+y*5)%57);
+    }
+    return out;
+}
+aa::Image withCounter(aa::Image image,const char* glyph) {
+    // Glifos sintéticos independentes dos recursos de Espírito Assassino.
+    for(int y=0;y<7;++y) for(int x=0;x<5;++x) if(glyph[y*5+x]=='1')
+        for(int dy=0;dy<3;++dy) for(int dx=0;dx<3;++dx)
+            for(int channel=0;channel<3;++channel) image.bgra[((36+y*3+dy)*64+41+x*3+dx)*4+channel]=255;
+    return image;
+}
+void checkGenericCounters() {
+    const auto identity=genericStatus();
+    const auto five=withCounter(identity,"11111" "10000" "10000" "11111" "00001" "00001" "11111");
+    const auto seven=withCounter(identity,"11111" "00001" "00010" "00100" "01000" "01000" "01000");
+    aa::Recognizer custom;
+    custom.setReference(identity);
+    check(custom.recognize(five,64).presence==aa::Presence::Present && !custom.recognize(five,64).stacks,
+        "Status generico sem amostras reconhece presenca sem inventar contador");
+    check(custom.setStackReference(5,five) && custom.setStackReference(7,seven),"Cadastrar amostras rotuladas 5 e 7");
+    for(int size:{24,32,44,64,80,100}) {
+        check(custom.recognize(resize(five,size),size).stacks==5u,"Contador generico 5 em escala calibrada");
+        check(custom.recognize(resize(seven,size),size).stacks==7u,"Contador generico 7 em escala calibrada");
+        check(!custom.recognize(resize(identity,size),size).stacks,"Status generico sem numero continua desconhecido");
+    }
+    check(custom.recognize(place(five,160,96,73,19),64).stacks==5u,"Contador generico localizado dentro da ROI");
+    aa::Recognizer independent;
+    independent.setReference(identity);
+    check(independent.setStackReference(7,seven),"Outro status recebe sua propria amostra");
+    check(!independent.recognize(five,64).stacks && independent.recognize(seven,64).stacks==7u,
+        "Status independente nao reutiliza amostra 5 de outra instancia");
+    check(custom.setStackReference(7,five),"Substituir amostra de um rotulo cadastrado");
+    check(!custom.recognize(five,64).stacks,"Amostras iguais com rotulos diferentes deixam contador ambiguo");
+    check(!custom.recognize(seven,64).stacks,"Substituicao remove a amostra antiga do rotulo");
+    check(independent.recognize(seven,64).stacks==7u,"Substituicao nao altera outra instancia");
+    custom.clearStackReferences();
+    check(custom.recognize(five,64).presence==aa::Presence::Present && !custom.recognize(five,64).stacks,
+        "Limpar contadores preserva identidade e remove todas as amostras");
+    for(unsigned value:{1u,99u}) {
+        custom.clearStackReferences();
+        check(custom.setStackReference(value,five),"Limites 1 e 99 aceitam amostras rotuladas");
+        check(custom.recognize(five,64).stacks==value,"O rotulo cadastrado define o valor reconhecido");
+        check(!custom.recognize(identity,64).stacks,"Nem rotulo 1 permite inferir contador sem numero visivel");
+    }
+    for(unsigned value:{0u,100u,~0u}) check(!custom.setStackReference(value,seven),"Rotulo fora de 1 a 99 deve ser recusado");
+    for(const auto& invalid:{aa::Image{},resize(seven,23),resize(seven,257)})
+        check(!custom.setStackReference(99,invalid),"Imagem de contador invalida deve ser recusada");
+    check(custom.recognize(five,64).stacks==99u && !custom.recognize(seven,64).stacks,
+        "Cadastro invalido nao substitui nem adiciona amostras");
+    custom.setReference(identity);
+    check(!custom.recognize(five,64).stacks,"Trocar referencia limpa contadores cadastrados");
+    check(!custom.setStackReference(1,identity),"Recorte sem numero deve ser recusado como amostra");
+    check(!custom.recognize(identity,64).stacks,"Amostra sem silhueta numerica nao pode gerar contador 1");
+    for(const auto& invalid:{aa::Image{},resize(identity,23),resize(identity,257)}) {
+        custom.setReference(invalid);
+        check(custom.recognize(identity,64).presence==aa::Presence::Unknown,"Referencia fora dos limites apaga identidade anterior");
+    }
+}
 }
 int main(int argc,char** argv) {
     const HRESULT com=CoInitializeEx(nullptr,COINIT_MULTITHREADED);
@@ -92,8 +156,44 @@ int main(int argc,char** argv) {
         aa::Recognizer custom;
         custom.setReference(none);
         check(custom.recognize(three,64).presence==aa::Presence::Present,"Referencia cadastrada deve substituir a identidade");
+        check(!custom.recognize(three,64).stacks && !custom.recognize(two,64).stacks,
+            "Status cadastrado nao pode herdar contadores do preset");
+        int singleClassFailures=0;
+        for(unsigned value:{2u,3u}) {
+            custom.setReference(value==2?two:three);
+            check(custom.setStackReference(value,value==2?two:three),"Cadastrar somente a contagem desejada");
+            for(int size:{24,32,44,64,80,100}) {
+                check(custom.setStackReference(value,resize(value==2?two:three,size)),
+                    "Contador visivel pode ser cadastrado em diferentes escalas");
+                check(custom.recognize(resize(value==2?two:three,size),size).stacks==value,
+                    "Amostra unica reconhece sua propria contagem");
+            }
+            custom.setReference(value==2?three:two);
+            check(custom.setStackReference(value,value==2?two:three),"A identidade pode conter outro numero visivel");
+            for(int size:{24,32,44,64,80,100}) {
+                const auto other=custom.recognize(resize(value==2?three:two,size),size);
+                check(other.presence==aa::Presence::Present,"Identidade com numero visivel deve reconhecer presenca");
+                if(other.stacks) {
+                    ++singleClassFailures;
+                    std::cerr<<"Classe unica "<<value<<" confundiu outro numero na escala "<<size<<"\n";
+                }
+            }
+        }
+        custom.setReference(none);
+        for(int size:{24,32,44,64,80,100}) {
+            if(custom.setStackReference(1,resize(none,size))) {
+                ++singleClassFailures;
+                std::cerr<<"Recorte real sem numero foi aceito como amostra na escala "<<size<<"\n";
+            }
+            if(custom.recognize(resize(none,size),size).stacks) {
+                ++singleClassFailures;
+                std::cerr<<"Recorte real sem numero produziu contador 1 na escala "<<size<<"\n";
+            }
+        }
+        check(singleClassFailures==0,"Amostra unica nao pode absorver outro numero ou recorte sem contador");
         custom.setReference({});
         check(custom.recognize(three,64).presence==aa::Presence::Unknown,"Referencia invalida apaga identidade anterior");
+        checkGenericCounters();
         struct RealCase { const char* file; aa::Presence presence; std::optional<unsigned> stacks; };
         const RealCase liveCases[]={
             {"12025625-stacks-unknown.png",aa::Presence::Absent,{}},
@@ -120,6 +220,10 @@ int main(int argc,char** argv) {
             {"12047375-stacks-unknown.png",aa::Presence::Absent,{}}
         };
         const auto live=assets.parent_path()/"tests"/"fixtures"/"recognition-live";
+        aa::Recognizer onlyTwo,onlyThree;
+        onlyTwo.clearStackReferences();
+        onlyThree.clearStackReferences();
+        check(onlyTwo.setStackReference(2,two) && onlyThree.setStackReference(3,three),"Contadores individuais para capturas reais");
         int failures=0;
         for(const auto& sample:liveCases) {
             const auto screenshot=aa::loadImage(live/sample.file);
@@ -127,6 +231,10 @@ int main(int argc,char** argv) {
             const auto packaged=embedded.recognize(screenshot,64);
             check(packaged.presence==actual.presence&&packaged.stacks==actual.stacks&&packaged.confidence==actual.confidence,
                 "Modelo embutido mudou a leitura de uma captura real");
+            check(onlyTwo.recognize(screenshot,64).stacks==(sample.stacks==2u?sample.stacks:std::nullopt),
+                "Classe unica 2 distingue outros numeros e ausencia de numero nos recortes reais");
+            check(onlyThree.recognize(screenshot,64).stacks==(sample.stacks==3u?sample.stacks:std::nullopt),
+                "Classe unica 3 distingue outros numeros e ausencia de numero nos recortes reais");
             if(actual.presence!=sample.presence || actual.stacks!=sample.stacks) {
                 ++failures;
                 std::cerr<<"Amostra "<<sample.file<<": esperado "<<sample.stacks.value_or(0)<<", obtido "<<actual.stacks.value_or(0)<<"\n";
