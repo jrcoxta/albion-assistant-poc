@@ -143,6 +143,10 @@ Recognizer::Recognizer(const std::filesystem::path& assetsDir) {
     stackReferences_.push_back({2,load(L"assassin-2.png",IDR_ASSASSIN_2)});
     stackReferences_.push_back({3,load(L"assassin-3.png",IDR_ASSASSIN_3)});
     for(const auto& reference:stackReferences_) references_.push_back(reference.image);
+    // Renderizações nativas pequenas preservam a silhueta do contador;
+    // não mudam a identidade nem os limiares de confiança.
+    stackReferences_.push_back({2,load(L"assassin-2-40.png",IDR_ASSASSIN_2_40)});
+    stackReferences_.push_back({3,load(L"assassin-3-40.png",IDR_ASSASSIN_3_40)});
 }
 void Recognizer::setReference(const Image& image) {
     references_.clear();
@@ -162,10 +166,8 @@ bool Recognizer::setClockReference(const Image& image) {
 bool Recognizer::clockReady() const { return clockReference_.valid(); }
 bool Recognizer::setStackReference(unsigned value,const Image& image) {
     if(value<1 || value>99 || !validReference(image) || !hasCounterInk(image)) return false;
-    for(auto& reference:stackReferences_) if(reference.value==value) {
-        reference.image=image;
-        return true;
-    }
+    // Uma amostra cadastrada substitui todas as variantes desse rótulo.
+    std::erase_if(stackReferences_,[value](const auto& reference){return reference.value==value;});
     stackReferences_.push_back({value,image});
     return true;
 }
@@ -276,12 +278,16 @@ Detection Recognizer::recognize(const Image& image,int iconSize,RegionShape sear
     if(clockReady()) out.remainingFraction=radialRemaining(image,out.icon,clockReference_);
     float bestScore=0,secondScore=0;
     unsigned bestValue=0;
-    for(const auto& reference:stackReferences_) {
-        const float score=digitScore(image,out.icon,reference.image);
+    std::array<float,100> classScores{};
+    for(const auto& reference:stackReferences_)
+        classScores[reference.value]=std::max(classScores[reference.value],digitScore(image,out.icon,reference.image));
+    // A margem compara valores distintos, não variantes do mesmo número.
+    for(unsigned value=1;value<classScores.size();++value) {
+        const float score=classScores[value];
         if(score>bestScore) {
             secondScore=bestScore;
             bestScore=score;
-            bestValue=reference.value;
+            bestValue=value;
         } else secondScore=std::max(secondScore,score);
     }
     // A margem entre classes não protege quando o número observado não foi cadastrado.

@@ -32,6 +32,31 @@ LRESULT CALLBACK testProc(HWND window,UINT message,WPARAM wp,LPARAM lp){
 void tab(App& app,int page){app.command(Tab0+page,BN_CLICKED);require(app.page==page,"navegação não mudou de página");}
 void choose(App& app,int id,int index,bool list=false){SendMessageW(app.item(id),list?LB_SETCURSEL:CB_SETCURSEL,index,0);app.command(id,list?LBN_SELCHANGE:CBN_SELCHANGE);}
 bool shows(App& app,const wchar_t* phrase){return std::any_of(app.controls.begin(),app.controls.end(),[&](HWND control){return text(control).find(phrase)!=std::wstring::npos;});}
+void createNamed(App& app,int command,const wchar_t* name,bool cancel=false,bool invalid=false){
+    const DWORD ownerThread=GetCurrentThreadId();std::atomic<bool> finished=false;bool opened=false,rejected=false;
+    std::thread responder([&]{
+        const auto deadline=GetTickCount64()+4000;
+        while(!finished&&GetTickCount64()<deadline){
+            struct Find{HWND owner,dialog{};} find{app.window};
+            EnumThreadWindows(ownerThread,[](HWND window,LPARAM value)->BOOL{
+                auto& f=*reinterpret_cast<Find*>(value);wchar_t type[32]{};GetClassNameW(window,type,32);
+                if(GetWindow(window,GW_OWNER)==f.owner&&std::wstring(type)==L"#32770"){f.dialog=window;return FALSE;}return TRUE;
+            },reinterpret_cast<LPARAM>(&find));
+            if(find.dialog&&GetDlgItem(find.dialog,710)&&IsWindowVisible(find.dialog)){
+                opened=true;SetDlgItemTextW(find.dialog,710,name);
+                if(!cancel)SendMessageW(find.dialog,WM_COMMAND,IDOK,0);
+                if(invalid){rejected=IsWindow(find.dialog)&&!text(GetDlgItem(find.dialog,711)).empty();}
+                if(cancel||invalid)SendMessageW(find.dialog,WM_COMMAND,IDCANCEL,0);
+                return;
+            }
+            Sleep(10);
+        }
+    });
+    try{app.command(command,BN_CLICKED);}catch(...){finished=true;responder.join();throw;}
+    finished=true;responder.join();
+    require(opened,"Novo gravou item antes de pedir e confirmar seu nome");
+    if(invalid)require(rejected,"nome invalido fechou o cadastro ou nao explicou a rejeicao");
+}
 void confirmDeleteHud(App& app,int answer){
     // Responde exclusivamente ao diálogo pertencente a esta janela/processo de teste.
     const DWORD ownerThread=GetCurrentThreadId();std::atomic<bool> answered=false;
@@ -116,6 +141,52 @@ int wmain(int argc,wchar_t** argv){
         const auto pictures=argc>1?std::filesystem::absolute(argv[1]):std::filesystem::path{};
         require(app.item(Start)&&!app.item(RuleName)&&!app.item(StatusName)&&!app.item(AreaName),"Monitor mistura editores");
         screenshot(app,pictures,L"ui-monitor.png");
+        {
+            const auto original=app.workspace;
+            tab(app,1);createNamed(app,NewHud,L"HUD criada uma vez");
+            require(app.workspace.huds.size()==3&&app.hud()->name==L"HUD criada uma vez"&&text(app.item(HudList))==app.hud()->name,
+                    "criar HUD exige outro Novo ou deixa nome provisório");
+            const auto selected=app.workspace.activeHudId;
+            SetWindowTextW(app.item(HudName),L"Rascunho preservado");
+            app.command(HudName,EN_CHANGE);
+            require(shows(app,L"Alterações pendentes"),"editar nome não informa que falta salvar");
+            createNamed(app,NewHud,L"Cancelado",true);
+            require(app.workspace.huds.size()==3&&app.workspace.activeHudId==selected&&app.hud()->name==L"HUD criada uma vez"&&text(app.item(HudName))==L"Rascunho preservado",
+                    "cancelar criação salvou, perdeu rascunho ou mudou seleção");
+            SetWindowTextW(app.item(HudName),L"HUD criada uma vez");
+            createNamed(app,NewHud,L"   ",false,true);createNamed(app,NewHud,L"hud criada uma vez",false,true);
+            require(app.workspace.huds.size()==3&&app.workspace.activeHudId==selected,"nome inválido ou repetido criou HUD");
+            createNamed(app,NewArea,L"Buffs criados uma vez");
+            require(app.hud()->areas.size()==1&&app.area()->name==L"Buffs criados uma vez","criação da área perdeu nome/seleção");
+            SetWindowTextW(app.item(AreaName),L"Área em edição");createNamed(app,NewArea,L"Cancelada",true);
+            require(app.area()->name==L"Buffs criados uma vez"&&text(app.item(AreaName))==L"Área em edição","cancelar perdeu ou gravou rascunho da área");
+            SetWindowTextW(app.item(AreaName),L"Buffs criados uma vez");createNamed(app,NewArea,L"buffs criados uma vez",false,true);
+            require(app.hud()->areas.size()==1&&app.area()->name==L"Buffs criados uma vez","cancelar/rejeitar área alterou a seleção");
+            tab(app,2);createNamed(app,NewStatus,L"Status criado uma vez");
+            require(app.workspace.statuses.size()==3&&app.selectedStatus()->name==L"Status criado uma vez"&&!app.selectedStatus()->builtinAssassin&&app.selectedStatus()->stacks.empty(),
+                    "criação do status perdeu nome ou herdou preset");
+            SetWindowTextW(app.item(StatusName),L"Status em edição");createNamed(app,NewStatus,L"Cancelado",true);
+            require(app.selectedStatus()->name==L"Status criado uma vez"&&text(app.item(StatusName))==L"Status em edição","cancelar perdeu ou gravou rascunho do status");
+            SetWindowTextW(app.item(StatusName),L"Status criado uma vez");createNamed(app,NewStatus,L"status criado uma vez",false,true);
+            require(app.workspace.statuses.size()==3&&app.selectedStatus()->name==L"Status criado uma vez","cancelar/rejeitar status alterou a seleção");
+            tab(app,3);createNamed(app,NewSet,L"Set criado uma vez");
+            SetWindowTextW(app.item(SetName),L"Set em edição");createNamed(app,NewSet,L"Cancelado",true);
+            require(app.set()->name==L"Set criado uma vez"&&text(app.item(SetName))==L"Set em edição","cancelar perdeu ou gravou rascunho do set");
+            SetWindowTextW(app.item(SetName),L"Set criado uma vez");createNamed(app,NewSet,L"set criado uma vez",false,true);
+            require(app.workspace.sets.size()==3&&app.set()->name==L"Set criado uma vez","cancelar/rejeitar set alterou a seleção");
+            createNamed(app,NewRule,L"Regra criada uma vez");
+            require(app.workspace.sets.size()==3&&app.set()->rules.size()==1&&app.rule()->condition.name==L"Regra criada uma vez",
+                    "criação de set/regra exige outro Novo");
+            createNamed(app,NewRule,L"REGRA CRIADA UMA VEZ",false,true);
+            SetWindowTextW(app.item(RuleName),L"Regra em edição");createNamed(app,NewRule,L"Cancelada",true);
+            require(app.rule()->condition.name==L"Regra criada uma vez"&&text(app.item(RuleName))==L"Regra em edição","cancelar perdeu ou gravou rascunho da regra");
+            require(app.set()->rules.size()==1,"criação aceitou regra duplicada");
+            SetWindowTextW(app.item(RuleName),L"Regra editada");app.command(Save,BN_CLICKED);
+            wchar_t savedRule[256]{};SendMessageW(app.item(RuleList),LB_GETTEXT,0,reinterpret_cast<LPARAM>(savedRule));
+            require(std::wstring(savedRule)==L"Regra editada"&&aa::loadWorkspace(app.workspacePath,{}).sets.back().rules.front().condition.name==L"Regra editada",
+                    "Salvar não refletiu edição na lista e no arquivo");
+            app.commit(original);app.selectedStatusId=L"s1";app.selectedArea=-1;app.selectedRule=-1;app.page=0;app.makeUI();
+        }
         choose(app,HudList,1);require(app.workspace.activeHudId==L"h2"&&app.workspace.activeSetId==L"set1"&&app.set()->rules[0].condition.stacks==3,"troca de HUD alterou o set");
         choose(app,SetList,1);require(app.workspace.activeHudId==L"h2"&&app.workspace.activeSetId==L"set2","troca de set alterou a HUD");choose(app,SetList,0);
 
@@ -315,6 +386,10 @@ int wmain(int argc,wchar_t** argv){
             require(!makeRecognizer(clockReader)->clockReady(),"referencia corrompida nao desativou apenas o relogio");
             clockReader.status.clockReferencePath.clear();
             require(makeRecognizer(clockReader)->clockReady(),"relogio do exemplo nao carrega quando solicitado");
+            clockReader.area.iconSize=38;
+            const auto liveClock=aa::loadImage(std::filesystem::path(__FILE__).parent_path()/L"fixtures"/L"recognition-clock"/L"120-77561887.png");
+            require(makeRecognizer(clockReader)->recognizeNearSize(liveClock,38).remainingFraction.has_value(),
+                    "monitor nao selecionou referencia temporal nativa para HUD de 38/40 px");
             app.makeUI();screenshot(app,pictures,L"ui-status-relogio.png");
             app.commit(before);app.makeUI();
         }
@@ -351,10 +426,10 @@ int wmain(int argc,wchar_t** argv){
         choose(app,Stacks,0);choose(app,EffectBox,1);app.saveEditor();require(app.rule()->condition.stacks==5&&app.rule()->effect==aa::OverlayEffect::Glow,"regra não salvou contador genérico e brilho");
         choose(app,ConditionBox,0);app.saveEditor();require(app.rule()->condition.condition==aa::Condition::Present&&!IsWindowEnabled(app.item(Stacks)),"presença usa contador");
         choose(app,ConditionBox,1);app.saveEditor();require(app.rule()->condition.condition==aa::Condition::Absent,"ausência mapeada incorretamente");
-        app.command(NewRule,BN_CLICKED);app.command(NewRule,BN_CLICKED);require(app.set()->rules.size()==3&&app.set()->rules[1].condition.name!=app.set()->rules[2].condition.name,"novas regras colidem");
+        createNamed(app,NewRule,L"Segunda regra");createNamed(app,NewRule,L"Terceira regra");require(app.set()->rules.size()==3&&app.set()->rules[1].condition.name!=app.set()->rules[2].condition.name,"novas regras colidem");
         app.command(MoveRuleUp,BN_CLICKED);require(app.selectedRule==1,"prioridade não mudou");app.command(DeleteRule,BN_CLICKED);require(app.set()->rules.size()==2,"regra não removida");
 
-        tab(app,1);app.command(NewHud,BN_CLICKED);require(app.hud()->areas.empty()&&app.hud()->clientWidth==0&&app.workspace.statuses.size()==2&&app.set()->rules.size()==2,"nova HUD copiou tela ou alterou biblioteca/set");
+        tab(app,1);createNamed(app,NewHud,L"Outra tela");require(app.hud()->areas.empty()&&app.hud()->clientWidth==0&&app.workspace.statuses.size()==2&&app.set()->rules.size()==2,"nova HUD copiou tela ou alterou biblioteca/set");
         const auto created=app.workspace.activeHudId;confirmDeleteHud(app,IDNO);require(app.workspace.activeHudId==created&&app.workspace.huds.size()==3,"cancelamento excluiu HUD");
         confirmDeleteHud(app,IDYES);require(app.workspace.huds.size()==2&&app.workspace.activeHudId!=created&&app.workspace.statuses.size()==2&&app.set()->rules.size()==2,"excluir HUD alterou biblioteca/set");
         choose(app,HudList,0);tab(app,3);app.selectedRule=0;app.makeUI();

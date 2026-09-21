@@ -150,6 +150,26 @@ void checkRadialClock(const std::filesystem::path& assets) {
     check(!real.recognize(last,64).remainingFraction,"Referencia real ja sombreada deixa progresso desconhecido");
     real.setClockReference(aa::loadImage(assets/"other-food.png"));
     check(!real.recognize(last,64).remainingFraction,"Referencia de outro status nao produz relogio");
+    const auto nativeFrames=assets.parent_path()/"tests"/"fixtures"/"recognition-clock";
+    check(real.setClockReference(aa::loadImage(assets/"assassin-clock-40.png")),"Referencia nativa40 aceita");
+    for(const auto& sample:{ClockCase{"120-77561887.png",.92f,.97f},
+            ClockCase{"150-77562806.png",.79f,.88f},ClockCase{"170-77563387.png",.72f,.81f},
+            ClockCase{"260-77565977.png",.88f,.96f},ClockCase{"440-77571591.png",.44f,.52f},
+            ClockCase{"460-77572234.png",.34f,.43f},ClockCase{"470-77572609.png",.29f,.38f}}) {
+        const auto measured=real.recognizeNearSize(aa::loadImage(nativeFrames/sample.file),38);
+        check(measured.stacks==3u,"Relogio nativo preserva contador3");
+        if(!measured.remainingFraction || *measured.remainingFraction<sample.low || *measured.remainingFraction>sample.high)
+            std::cerr<<"Relogio40 "<<sample.file<<": "<<measured.remainingFraction.value_or(-1.f)<<"\n";
+        check(measured.remainingFraction && *measured.remainingFraction>=sample.low && *measured.remainingFraction<=sample.high,
+            "Relogio40 acompanha frente visivel na calibracao manual38");
+    }
+    for(const auto* file:{"0-77557234.png","238-77565415.png","400-77570263.png","473-77572698.png"})
+        check(!real.recognizeNearSize(aa::loadImage(nativeFrames/file),38).remainingFraction,
+            "Ausencia, disco iluminado ou frente encoberta nao inventam relogio40");
+    real.setClockReference(reference);
+    check(!real.recognizeNearSize(aa::loadImage(nativeFrames/"150-77562806.png"),38).remainingFraction,
+          "Referencia64 incompatível com renderizacao40 nao inventa relogio");
+
 }
 void checkCircularSearch(const aa::Recognizer& recognizer,const aa::Image& three) {
     aa::Image blankCircle{64,64,std::vector<std::uint8_t>(64*64*4,0)};
@@ -244,6 +264,10 @@ int main(int argc,char** argv) {
         check(sameImage(aa::loadImageResource(IDR_ASSASSIN_NONE),none),"Referencia sem numero embutida difere do arquivo original");
         check(sameImage(aa::loadImageResource(IDR_ASSASSIN_2),two),"Referencia 2 embutida difere do arquivo original");
         check(sameImage(aa::loadImageResource(IDR_ASSASSIN_3),three),"Referencia 3 embutida difere do arquivo original");
+        for(const auto& resource: {std::pair{IDR_ASSASSIN_2_40,"assassin-2-40.png"},
+                std::pair{IDR_ASSASSIN_3_40,"assassin-3-40.png"},std::pair{IDR_ASSASSIN_CLOCK_40,"assassin-clock-40.png"}})
+            check(sameImage(aa::loadImageResource(resource.first),aa::loadImage(assets/resource.second)),
+                  "Recurso nativo40 embutido difere da amostra literal");
         bool rejectedResource=false;
         try { aa::loadImageResource(65535); } catch(const std::runtime_error&) { rejectedResource=true; }
         check(rejectedResource,"Recurso embutido ausente deve informar erro");
@@ -363,6 +387,30 @@ int main(int argc,char** argv) {
                         ambiguous.bgra.data()+(static_cast<std::size_t>(y)*ambiguous.width+x+90)*4);
         check(recognizer.recognizeNearSize(ambiguous,38).presence==aa::Presence::Unknown,
               "Tolerancia escolheu arbitrariamente entre dois icones reais");
+        const auto clockFrames=assets.parent_path()/"tests"/"fixtures"/"recognition-clock";
+        for(const auto* name:{"136-77562389.png","318-77567781.png","463-77572325.png"}) {
+            const auto frame=aa::loadImage(clockFrames/name);
+            const auto read=recognizer.recognizeNearSize(frame,38);
+            check(read.presence==aa::Presence::Present&&read.stacks==3u,
+                  "Variacao real do digito pequeno apagou tres stacks visiveis");
+        }
+        for(const auto* name:{"60-77559747.png","70-77560156.png"})
+            check(recognizer.recognizeNearSize(aa::loadImage(clockFrames/name),38).stacks==2u,
+                  "Variante nativa40 nao confunde dois com tres stacks");
+        const auto unnumbered=recognizer.recognizeNearSize(aa::loadImage(clockFrames/"5-77557699.png"),38);
+        check(unnumbered.presence==aa::Presence::Present&&!unnumbered.stacks,
+              "Status nativo40 sem numero nao herda contador");
+        for(const auto* name:{"0-77557234.png","473-77572698.png"}) {
+            const auto absent=recognizer.recognizeNearSize(aa::loadImage(clockFrames/name),38);
+            check(absent.presence==aa::Presence::Absent&&!absent.stacks,
+                  "Outro status antes e depois nao herda identidade nem contador");
+        }
+        aa::Recognizer replaced(assets);
+        check(replaced.setStackReference(3,two),"Substituir todas as variantes do rotulo3");
+        check(!replaced.recognizeNearSize(aa::loadImage(clockFrames/"136-77562389.png"),38).stacks,
+              "Amostra customizada nao conserva variante40 antiga do mesmo rotulo");
+        check(!replaced.recognize(three,64).stacks,
+              "Amostra customizada nao conserva variante64 antiga do mesmo rotulo");
         checkGenericCounters();
         checkRadialClock(assets);
         struct RealCase { const char* file; aa::Presence presence; std::optional<unsigned> stacks; };

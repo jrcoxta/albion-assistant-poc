@@ -86,6 +86,7 @@ struct App {
     // Implementação da interface e CRUD em app_ui.cpp.
     void makeUI();
     void rebuildUIWithDraft();
+    aa::Workspace editorValues();
     void saveEditor();
     void command(int id,int notification);
     void updateRuleChoices();

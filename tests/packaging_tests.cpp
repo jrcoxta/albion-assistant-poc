@@ -26,7 +26,7 @@ int wmain(int argc, wchar_t** argv) {
             require(size>0&&data,"recurso vazio ou inválido");
             return std::string(static_cast<const char*>(data),size);
         };
-        for(int id:{IDR_ASSASSIN_NONE,IDR_ASSASSIN_2,IDR_ASSASSIN_3,IDR_ASSASSIN_CLOCK}){
+        for(int id:{IDR_ASSASSIN_NONE,IDR_ASSASSIN_2,IDR_ASSASSIN_3,IDR_ASSASSIN_CLOCK,IDR_ASSASSIN_2_40,IDR_ASSASSIN_3_40,IDR_ASSASSIN_CLOCK_40}){
             const auto png=resource(id,RT_RCDATA);
             require(png.starts_with(std::string("\x89PNG\r\n\x1a\n",8)),"referência embutida não é PNG");
         }

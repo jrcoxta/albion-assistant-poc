@@ -62,7 +62,10 @@ std::unique_ptr<aa::Recognizer> makeRecognizer(const aa::MonitorReader& reader){
         // O relógio é opcional: uma referência temporal ruim não desativa presença/stacks.
         try {
             if(!reader.status.clockReferencePath.empty())recognizer->setClockReference(aa::loadImage(reader.status.clockReferencePath));
-            else if(reader.status.builtinAssassin)recognizer->setClockReference(aa::loadImageResource(IDR_ASSASSIN_CLOCK));
+            else if(reader.status.builtinAssassin){
+                const int resource=std::abs(reader.area.iconSize-40)<std::abs(reader.area.iconSize-64)?IDR_ASSASSIN_CLOCK_40:IDR_ASSASSIN_CLOCK;
+                recognizer->setClockReference(aa::loadImageResource(resource));
+            }
         }catch(const std::exception&){recognizer->setClockReference({});}
     }
     return recognizer;

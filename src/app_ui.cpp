@@ -101,6 +101,76 @@ std::wstring regionText(const aa::HudArea& area,AreaUsage usage) {
 void setIfChanged(HWND control,const std::wstring& value) {
     if(control&&text(control)!=value)SetWindowTextW(control,value.c_str());
 }
+bool createsItem(int id){return id==NewHud||id==NewArea||id==NewStatus||id==NewSet||id==NewRule;}
+void validateNewName(App& app,int id,const std::wstring& name){
+    aa::Workspace values;
+    try{values=app.editorValues();}
+    catch(const std::exception& error){throw std::runtime_error(std::string("Cancele este cadastro e corrija a edição anterior: ")+error.what());}
+    if(id==NewHud)checkName(values.huds,L"",name);
+    else if(id==NewStatus)checkName(values.statuses,L"",name);
+    else if(id==NewSet)checkName(values.sets,L"",name);
+    else if(id==NewArea){
+        const auto hud=byId(values.huds,values.activeHudId);
+        if(!hud)throw std::runtime_error("Crie uma HUD antes de adicionar áreas.");
+        for(const auto& area:hud->areas)if(aa::sameName(area.name,name))throw std::runtime_error("Já existe uma área com esse nome nesta HUD.");
+    }else{
+        const auto set=byId(values.sets,values.activeSetId);
+        if(!set)throw std::runtime_error("Crie um set antes de adicionar regras.");
+        for(const auto& rule:set->rules)if(aa::sameName(rule.condition.name,name))throw std::runtime_error("Já existe uma regra com esse nome neste set.");
+    }
+}
+struct NamePrompt{App& app;int command;const wchar_t* title;const wchar_t* hint;std::wstring name;};
+INT_PTR CALLBACK namePromptProc(HWND dialog,UINT message,WPARAM wp,LPARAM lp){
+    auto* prompt=reinterpret_cast<NamePrompt*>(GetWindowLongPtrW(dialog,DWLP_USER));
+    try{
+        if(message==WM_INITDIALOG){
+            prompt=reinterpret_cast<NamePrompt*>(lp);SetWindowLongPtrW(dialog,DWLP_USER,lp);
+            auto& app=prompt->app;theme::attachWindow(dialog);SetWindowTextW(dialog,prompt->title);
+            RECT bounds{0,0,app.px(480),app.px(248)};
+            AdjustWindowRectExForDpi(&bounds,static_cast<DWORD>(GetWindowLongPtrW(dialog,GWL_STYLE)),FALSE,0,GetDpiForWindow(dialog));
+            RECT parent{};GetWindowRect(app.window,&parent);
+            const int width=bounds.right-bounds.left,height=bounds.bottom-bounds.top;
+            SetWindowPos(dialog,nullptr,parent.left+(parent.right-parent.left-width)/2,parent.top+(parent.bottom-parent.top-height)/2,width,height,SWP_NOZORDER);
+            const auto control=[&](const wchar_t* type,const wchar_t* title,DWORD style,int x,int y,int w,int h,int id){
+                auto field=CreateWindowExW(0,type,title,WS_CHILD|WS_VISIBLE|style,app.px(x),app.px(y),app.px(w),app.px(h),dialog,reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),app.instance,nullptr);
+                if(!field)throw std::runtime_error("Não foi possível abrir o cadastro.");
+                SendMessageW(field,WM_SETFONT,reinterpret_cast<WPARAM>(app.font),FALSE);theme::styleControl(field,id==IDOK?theme::Role::Primary:theme::Role::Normal);return field;
+            };
+            control(L"STATIC",L"Nome",0,24,20,432,22,0);
+            const auto name=control(L"EDIT",L"",WS_TABSTOP|WS_BORDER|ES_AUTOHSCROLL,24,46,432,30,710);
+            SendMessageW(name,EM_SETLIMITTEXT,251,0);
+            control(L"STATIC",prompt->hint,0,24,89,432,44,0);
+            control(L"STATIC",L"",0,24,140,432,44,711);
+            control(L"BUTTON",L"Criar",WS_TABSTOP|BS_DEFPUSHBUTTON,228,196,108,32,IDOK);
+            control(L"BUTTON",L"Cancelar",WS_TABSTOP|BS_PUSHBUTTON,348,196,108,32,IDCANCEL);
+            SetFocus(name);return FALSE;
+        }
+        if(message==WM_PAINT){PAINTSTRUCT paint{};auto dc=BeginPaint(dialog,&paint);RECT bounds{};GetClientRect(dialog,&bounds);theme::fill(dc,bounds,theme::Background);EndPaint(dialog,&paint);return TRUE;}
+        if(message==WM_CLOSE){EndDialog(dialog,IDCANCEL);return TRUE;}
+        if(message==WM_COMMAND&&prompt){
+            if(LOWORD(wp)==IDCANCEL){EndDialog(dialog,IDCANCEL);return TRUE;}
+            if(LOWORD(wp)==IDOK){
+                auto name=nameFrom(GetDlgItem(dialog,710));validateNewName(prompt->app,prompt->command,name);
+                prompt->name=std::move(name);EndDialog(dialog,IDOK);return TRUE;
+            }
+            if(LOWORD(wp)==710&&HIWORD(wp)==EN_CHANGE){SetDlgItemTextW(dialog,711,L"");return TRUE;}
+        }
+    }catch(const std::exception& error){SetDlgItemTextW(dialog,711,widen(error.what()).c_str());SetFocus(GetDlgItem(dialog,710));return TRUE;}
+    return FALSE;
+}
+std::optional<std::wstring> requestName(App& app,int id){
+    NamePrompt prompt{app,id,L"Nova regra",L"Depois de criar, escolha o status, a condição e o destaque.",{}};
+    if(id==NewHud){prompt.title=L"Nova HUD";prompt.hint=L"Use um nome para esta tela ou layout, como Monitor 34.\nDepois, selecione as áreas do jogo.";}
+    else if(id==NewArea){prompt.title=L"Nova área";prompt.hint=L"Use um nome como Meus status ou E.\nDepois, selecione onde essa área fica no jogo.";}
+    else if(id==NewStatus){prompt.title=L"Novo status";prompt.hint=L"Dê um nome ao buff ou debuff.\nDepois, capture ou importe sua imagem.";}
+    else if(id==NewSet){prompt.title=L"Novo set";prompt.hint=L"Use o nome da arma ou do conjunto que está usando.\nDepois, adicione suas regras.";}
+    struct alignas(DWORD) Template{DLGTEMPLATE dialog{};WORD menu=0,windowClass=0,title=0;} layout;
+    layout.dialog.style=WS_POPUP|WS_CAPTION|WS_SYSMENU|DS_MODALFRAME;layout.dialog.cx=240;layout.dialog.cy=150;
+    struct SelectionGuard{bool& selecting;bool previous;~SelectionGuard(){selecting=previous;}} guard{app.selecting,app.selecting};app.selecting=true;
+    const auto result=DialogBoxIndirectParamW(app.instance,&layout.dialog,app.window,namePromptProc,reinterpret_cast<LPARAM>(&prompt));
+    if(result==-1)throw std::runtime_error("Não foi possível abrir o cadastro.");
+    return result==IDOK?std::optional<std::wstring>{std::move(prompt.name)}:std::nullopt;
+}
 }
 
 int App::px(int value) const {return static_cast<int>(value*dpi);}
@@ -300,8 +370,8 @@ void App::rebuildUIWithDraft() {
     updateRuleChoices();refreshStatus();
 }
 
-void App::saveEditor() {
-    if(rebuilding||controls.empty())return;
+aa::Workspace App::editorValues() {
+    if(rebuilding||controls.empty())return workspace;
     auto changed=workspace;
     if(page==0&&item(Validity))changed.validityMs=number(Validity,1,60000);
     if(page==1)if(auto currentHud=byId(changed.huds,changed.activeHudId)) {
@@ -340,7 +410,11 @@ void App::saveEditor() {
             if(color>=0)value.condition.color=static_cast<std::uint32_t>(SendMessageW(item(Color),CB_GETITEMDATA,color,0));
         }
     }
-    stop();commit(std::move(changed));
+    return changed;
+}
+void App::saveEditor() {
+    if(rebuilding||controls.empty())return;
+    auto changed=editorValues();stop();commit(std::move(changed));
 }
 
 void App::updateRuleChoices() {
@@ -377,6 +451,11 @@ void App::updateRuleChoices() {
 
 void App::command(int id,int notification) {
     if(rebuilding||selecting)return;
+    if((notification==EN_CHANGE&&(id==HudName||id==AreaName||id==StatusName||id==SetName||id==RuleName||id==Validity))||
+       (notification==CBN_SELCHANGE&&(id==StatusKind||id==RuleStatus||id==ConditionBox||id==Stacks||id==EffectBox||id==Color||id==SourceArea||id==TargetArea))||
+       (notification==BN_CLICKED&&(id==Enabled||id==FollowClock))){
+        error=L"Alterações pendentes. Use Salvar; trocar de item ou seção também salva.";refreshStatus();
+    }
     if(id==FollowClock&&notification==BN_CLICKED){updateRuleChoices();return;}
     if(notification==CBN_SELCHANGE&&(id==RuleStatus||id==ConditionBox||id==Stacks||id==EffectBox||id==Color||id==SourceArea||id==TargetArea)){updateRuleChoices();return;}
     const bool navigation=(notification==CBN_SELCHANGE&&(id==HudList||id==SetList))||
@@ -428,14 +507,18 @@ void App::command(int id,int notification) {
     const bool action=id==NewHud||id==DeleteHud||id==NewArea||id==DeleteArea||id==SelectArea||id==CalibrateArea||id==NewStatus||id==DeleteStatus||
         id==CaptureStatus||id==ImportStatus||id==CaptureStack||id==DeleteStack||id==AddPreset||id==NewSet||id==DeleteSet||id==NewRule||id==DeleteRule||id==MoveRuleUp||id==MoveRuleDown;
     if(!action)return;
-    saveEditor();auto changed=workspace;auto currentHud=byId(changed.huds,changed.activeHudId);auto currentSet=byId(changed.sets,changed.activeSetId);
+    std::optional<std::wstring> newName;
+    if(createsItem(id)){newName=requestName(*this,id);if(!newName)return;}
+    if(!newName)saveEditor();
+    auto changed=newName?editorValues():workspace;stop();
+    auto currentHud=byId(changed.huds,changed.activeHudId);auto currentSet=byId(changed.sets,changed.activeSetId);
     auto status=byId(changed.statuses,selectedStatusId);
     const auto oldStatusId=selectedStatusId;const int oldArea=selectedArea,oldRule=selectedRule;int focus=0;
     switch(id) {
     case NewHud: {
         if(changed.huds.size()>=64)throw std::runtime_error("O limite é de 64 HUDs. Exclua uma HUD para criar outra.");
-        aa::HudLayout value;value.id=aa::newId(changed);value.name=uniqueName(changed.huds,L"Nova HUD");changed.activeHudId=value.id;
-        changed.huds.push_back(std::move(value));selectedArea=-1;focus=HudName;error=L"Nova HUD criada. Nomeie suas áreas e selecione-as no jogo.";break;
+        aa::HudLayout value;value.id=aa::newId(changed);value.name=*newName;changed.activeHudId=value.id;
+        changed.huds.push_back(std::move(value));selectedArea=-1;focus=NewArea;error=L"HUD criada e salva. Adicione uma área para ler status ou receber destaque.";break;
     }
     case DeleteHud:
         if(!currentHud)return;
@@ -444,8 +527,8 @@ void App::command(int id,int notification) {
     case NewArea:
         if(!currentHud)throw std::runtime_error("Crie uma HUD antes de adicionar áreas.");
         if(currentHud->areas.size()>=32)throw std::runtime_error("O limite é de 32 áreas por HUD.");
-        currentHud->areas.push_back({uniqueName(currentHud->areas,L"Nova área"),{},48,false});selectedArea=static_cast<int>(currentHud->areas.size())-1;
-        focus=AreaName;error=L"Área criada. Dê um nome e escolha Retângulo ou Círculo ao selecionar.";break;
+        currentHud->areas.push_back({*newName,{},48,false});selectedArea=static_cast<int>(currentHud->areas.size())-1;
+        focus=SelectArea;error=L"Área criada e salva. Selecione agora sua posição no jogo.";break;
     case DeleteArea:
         if(!currentHud||!area())return;
         currentHud->areas.erase(currentHud->areas.begin()+selectedArea);selectedArea=-1;
@@ -471,8 +554,8 @@ void App::command(int id,int notification) {
     }
     case NewStatus:case AddPreset: {
         if(changed.statuses.size()>=64)throw std::runtime_error("O limite é de 64 status. Exclua um status sem regras para criar outro.");
-        aa::StatusDefinition value;value.id=aa::newId(changed);value.name=uniqueName(changed.statuses,id==AddPreset?L"Espírito Assassino":L"Novo status");value.builtinAssassin=id==AddPreset;
-        selectedStatusId=value.id;changed.statuses.push_back(std::move(value));focus=StatusName;
+        aa::StatusDefinition value;value.id=aa::newId(changed);value.name=id==AddPreset?uniqueName(changed.statuses,L"Espírito Assassino"):*newName;value.builtinAssassin=id==AddPreset;
+        selectedStatusId=value.id;changed.statuses.push_back(std::move(value));focus=id==AddPreset?StatusName:CaptureStatus;
         error=id==AddPreset?L"Exemplo adicionado à biblioteca com amostras de 2 e 3 stacks.":L"Status criado. Capture ou importe a imagem de referência.";break;
     }
     case DeleteStatus:
@@ -512,8 +595,8 @@ void App::command(int id,int notification) {
     }
     case NewSet: {
         if(changed.sets.size()>=64)throw std::runtime_error("O limite é de 64 sets. Exclua um set para criar outro.");
-        aa::SetProfile value;value.id=aa::newId(changed);value.name=uniqueName(changed.sets,L"Novo set");changed.activeSetId=value.id;
-        changed.sets.push_back(std::move(value));selectedRule=-1;focus=SetName;error=L"Set criado. Adicione as regras para seus status.";break;
+        aa::SetProfile value;value.id=aa::newId(changed);value.name=*newName;changed.activeSetId=value.id;
+        changed.sets.push_back(std::move(value));selectedRule=-1;focus=NewRule;error=L"Set criado e salvo. Adicione uma regra para seus status.";break;
     }
     case DeleteSet:
         if(!currentSet)return;
@@ -522,9 +605,7 @@ void App::command(int id,int notification) {
     case NewRule: {
         if(!currentSet)throw std::runtime_error("Crie um set antes de adicionar regras.");
         if(currentSet->rules.size()>=32)throw std::runtime_error("O limite é de 32 regras por set.");
-        aa::StatusRule value;value.id=aa::newId(changed);value.condition.name=L"Nova regra";
-        for(unsigned suffix=2;std::any_of(currentSet->rules.begin(),currentSet->rules.end(),[&](const auto& entry){return aa::sameName(entry.condition.name,value.condition.name);});++suffix)
-            value.condition.name=L"Nova regra "+std::to_wstring(suffix);
+        aa::StatusRule value;value.id=aa::newId(changed);value.condition.name=*newName;
         value.condition.profile=currentSet->name;value.condition.condition=aa::Condition::Present;value.condition.stacks=1;
         if(!changed.statuses.empty())value.statusId=changed.statuses.front().id;
         if(currentHud&&!currentHud->areas.empty()){value.sourceArea=currentHud->areas.front().name;value.targetArea=currentHud->areas.back().name;}
@@ -540,7 +621,7 @@ void App::command(int id,int notification) {
     default:return;
     }
     try{commit(std::move(changed));}catch(...){selectedStatusId=oldStatusId;selectedArea=oldArea;selectedRule=oldRule;throw;}
-    makeUI();if(focus){SetFocus(item(focus));SendMessageW(item(focus),EM_SETSEL,0,-1);}
+    makeUI();if(focus){SetFocus(item(focus));if(focus==StatusName||focus==RuleName)SendMessageW(item(focus),EM_SETSEL,0,-1);}
 }
 
 void App::refreshStatus() {
