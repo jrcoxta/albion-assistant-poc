@@ -176,6 +176,22 @@ bool Recognizer::setStackReference(unsigned value,const Image& image) {
 }
 Detection Recognizer::recognizeNearSize(const Image& image,int iconSize,RegionShape searchShape) const {
     auto result=recognize(image,iconSize,searchShape);
+    // A borda selecionada pode medir dois pixels além do ícone renderizado.
+    // A identidade tolera isso, mas o aro temporal não; reaproveitar somente
+    // sua fração de uma escala vizinha que localize o mesmo ícone.
+    if(result.presence==Presence::Present&&clockReady()&&!result.remainingFraction) {
+        std::optional<Detection> timed;
+        for(int offset:{-2,-1,1,2}) {
+            const int size=iconSize+offset;
+            if(size<24||size>256||size>image.width||size>image.height)continue;
+            auto candidate=recognize(image,size,searchShape);
+            const auto distance=std::hypot((candidate.icon.x+candidate.icon.width/2.0)-(result.icon.x+result.icon.width/2.0),
+                                           (candidate.icon.y+candidate.icon.height/2.0)-(result.icon.y+result.icon.height/2.0));
+            if(candidate.presence==Presence::Present&&candidate.remainingFraction&&distance<=iconSize/6.0&&
+               (!timed||candidate.confidence>timed->confidence))timed=std::move(candidate);
+        }
+        if(timed)result.remainingFraction=timed->remainingFraction;
+    }
     // Não reinterpretar uma captura inválida, uniforme ou ambígua. A tolerância
     // corrige somente o tamanho manual, sem diminuir os limiares de identidade.
     if(result.presence==Presence::Present ||

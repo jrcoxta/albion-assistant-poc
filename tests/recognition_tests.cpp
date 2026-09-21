@@ -27,6 +27,12 @@ aa::Image place(const aa::Image& source, int width, int height, int left, int to
         out.bgra.data()+(std::size_t(top+y)*width+left)*4);
     return out;
 }
+aa::Image crop(const aa::Image& source,int left,int top,int width,int height) {
+    aa::Image out{width,height,std::vector<std::uint8_t>(std::size_t(width)*height*4)};
+    for(int y=0;y<height;++y) std::copy_n(source.bgra.data()+(std::size_t(top+y)*source.width+left)*4,width*4,
+        out.bgra.data()+std::size_t(y)*width*4);
+    return out;
+}
 aa::Image genericStatus() {
     aa::Image out{64,64,std::vector<std::uint8_t>(64*64*4,255)};
     for(int y=0;y<64;++y) for(int x=0;x<64;++x) {
@@ -133,6 +139,14 @@ void checkRadialClock(const std::filesystem::path& assets) {
             "Referencia de relogio preserva os pixels do print real");
     aa::Recognizer real(assets);
     check(real.setClockReference(reference),"Referencia real propria e aceita");
+    // A seleção manual pode medir a moldura como 66 px embora o desenho do
+    // jogo ocupe 64 px. A identidade ainda é localizada; o relógio precisa
+    // usar a mesma tolerância local em vez de desaparecer.
+    const auto clockFrame=crop(aa::loadImage(live/"12046609-stacks-3.png"),35,11,64,64);
+    const auto manuallyMeasured66=place(clockFrame,112,112,24,24);
+    const auto clockAt66=real.recognizeNearSize(manuallyMeasured66,66);
+    check(clockAt66.presence==aa::Presence::Present&&clockAt66.remainingFraction.has_value(),
+        "Relogio nativo nao pode desaparecer quando a selecao mede dois pixels a mais");
     // Intervalos largos cobrem somente a geometria visivel conferida no corpus:
     // frente entre ~20 e40 graus; ~45 e65 graus; e novamente ~20 e40 graus.
     struct ClockCase { const char* file; float low,high; };
