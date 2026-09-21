@@ -506,7 +506,8 @@ std::vector<std::wstring> readinessIssues(const Workspace& w) {
             if (!inBounds(*hud, source->region)) issue(L"região de origem não está calibrada dentro da HUD.");
             if (!source->iconCalibrated || source->iconSize < 24 || source->iconSize > 256 ||
                 source->iconSize > source->region.width || source->iconSize > source->region.height)
-                issue(L"escala do ícone da origem precisa de calibração.");
+                issue(L"em HUDs, escolha a HUD “" + hud->name + L"”, selecione a área “" + source->name +
+                    L"” e clique em “Calibrar tamanho do ícone”.");
         }
         if (!target) issue(L"região de destino inexistente: " + rule.targetArea);
         else if (!inBounds(*hud, target->region)) issue(L"região de destino não está calibrada dentro da HUD.");

@@ -99,13 +99,15 @@ void App::stop(){
     {std::lock_guard lock(mutex);latest.clear();latestSource=0;latestImage={};latestError.clear();pending=false;}
 }
 void App::start(){
-    if(selecting)return;saveEditor();stop();
+    if(selecting)return;
+    capturePreview={};InvalidateRect(window,nullptr,FALSE);
+    saveEditor();stop();
     if((!target||!IsWindow(target))&&!connect())return;
     if(IsIconic(target))ShowWindow(target,SW_RESTORE);
     auto issues=aa::readinessIssues(workspace);
     if(!geometryMatches())issues.insert(issues.begin(),L"A HUD não corresponde à resolução/escala atual. Escolha outra ou crie uma HUD para esta tela.");
     if(!issues.empty()){
-        error=L"Antes de iniciar:\n";for(std::size_t i=0;i<std::min<std::size_t>(issues.size(),4);++i)error+=L"• "+issues[i]+L"\n";
+        error=L"Antes de iniciar:\r\n";for(std::size_t i=0;i<std::min<std::size_t>(issues.size(),4);++i)error+=L"• "+issues[i]+L"\r\n";
         page=0;makeUI();return;
     }
     plan=aa::makeMonitorPlan(workspace);
@@ -137,7 +139,7 @@ void App::start(){
     }catch(...){stop();throw;}
 }
 void App::consume(){
-    {std::lock_guard lock(mutex);pending=false;if(!running||latestSource!=source)return;current=latest;if(latestImage.valid())preview=std::move(latestImage);error=latestError;}
+    {std::lock_guard lock(mutex);pending=false;if(!running||latestSource!=source)return;current=latest;if(latestImage.valid())capturePreview=std::move(latestImage);error=latestError;}
     updateHighlight();refreshStatus();if(page==0){RECT area{px(24),px(486),px(832),px(602)};InvalidateRect(window,&area,FALSE);}
 }
 void App::updateHighlight(){
@@ -189,7 +191,7 @@ std::optional<PickedImage> App::pick(aa::SelectionKind kind,const aa::Recognizer
         if(chosen){const auto after=screenOf(target);
             if(after.width!=before.width||after.height!=before.height||after.dpi!=before.dpi||after.device!=before.device)throw std::runtime_error("A tela mudou durante a seleção. Tente novamente.");
             if(!fits(*chosen,before.width,before.height))throw std::runtime_error("A região selecionada está fora da janela.");
-            result=PickedImage{*chosen,aa::cropImage(snapshot,*chosen),before};preview=result->image;}
+            result=PickedImage{*chosen,aa::cropImage(snapshot,*chosen),before};}
         selecting=false;ShowWindow(window,SW_SHOW);SetForegroundWindow(window);return result;
     }catch(...){selecting=false;ShowWindow(window,SW_SHOW);SetForegroundWindow(window);throw;}
 }

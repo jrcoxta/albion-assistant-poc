@@ -48,7 +48,7 @@ struct App {
     bool diagnostics=false, showOverlayInCapture=false;
     std::wstring error=L"Conecte ao jogo. Escolha uma HUD e um set para iniciar.", hotkeyWarning;
     std::vector<HWND> controls;
-    aa::Image preview;
+    aa::Image capturePreview, referencePreview;
     aa::DesktopCapture capture;
     aa::MonitorPlan plan;
     std::vector<std::unique_ptr<aa::Recognizer>> recognizers;

@@ -145,7 +145,7 @@ void App::makeUI() {
         label(L"Validade da leitura (ms)",478,207,216);edit(std::to_wstring(workspace.validityMs).c_str(),Validity,702,204,130);
         label(L"Leituras e destaques",24,250,808);
         control(L"EDIT",L"",WS_TABSTOP|WS_BORDER|WS_VSCROLL|ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL,24,275,808,159,MonitorSummary);
-        label(L"Última imagem capturada",24,449,620);button(L"Salvar ajuste",Save,664,444,168);
+        label(L"Última captura da área monitorada",24,449,620);button(L"Salvar ajuste",Save,664,444,168);
     } else if(page==1) {
         label(L"HUDs salvas",24,136,350);hudChoices(24,158,350);
         label(L"Nome da HUD",394,136,268);edit(hud()?hud()->name.c_str():L"",HudName,394,158,268);
@@ -181,11 +181,11 @@ void App::makeUI() {
         choose(stacks,0,true);button(L"Excluir amostra selecionada",DeleteStack,568,491,264);
         button(L"Novo status",NewStatus,24,547,112);button(L"Excluir status",DeleteStatus,148,547,114);
         label(L"Valor",282,551,58);edit(L"1",SampleValue,344,549,54);button(L"Capturar amostra",CaptureStack,410,547,216);button(L"Salvar status",Save,644,547,188);
-        preview={};
+        referencePreview={};
         if(selectedStatus()) {
             try {
-                if(!selectedStatus()->referencePath.empty())preview=aa::loadImage(selectedStatus()->referencePath);
-                else if(selectedStatus()->builtinAssassin)preview=aa::loadImageResource(IDR_ASSASSIN_NONE);
+                if(!selectedStatus()->referencePath.empty())referencePreview=aa::loadImage(selectedStatus()->referencePath);
+                else if(selectedStatus()->builtinAssassin)referencePreview=aa::loadImageResource(IDR_ASSASSIN_NONE);
             }catch(const std::exception& e){error=L"Não foi possível abrir a referência: "+widen(e.what());}
         }
         for(int id:{StatusName,StatusKind,CaptureStatus,ImportStatus,DeleteStatus,SampleValue,CaptureStack,StackList,DeleteStack,Save})EnableWindow(item(id),selectedStatus()!=nullptr);
@@ -340,7 +340,7 @@ void App::command(int id,int notification) {
         error=L"Seleção atualizada. As alterações anteriores foram salvas.";makeUI();return;
     }
     if(notification!=BN_CLICKED)return;
-    if(id>=Tab0&&id<Tab0+4){saveEditor();page=id-Tab0;if(page==0)preview={};error=L"Alterações salvas.";makeUI();return;}
+    if(id>=Tab0&&id<Tab0+4){saveEditor();page=id-Tab0;if(page==0)capturePreview={};error=L"Alterações salvas.";makeUI();return;}
     if(id==Stop){stop();error=L"Leitura parada. Os destaques estão apagados.";refreshStatus();return;}
     if(id==Connect){saveEditor();connect();refreshStatus();return;}
     if(id==Start){start();refreshStatus();return;}
@@ -396,7 +396,7 @@ void App::command(int id,int notification) {
                 throw std::runtime_error("Selecione um ícone inteiro dentro da área escolhida.");
             value.iconSize=r.width;value.iconCalibrated=true;error=L"Tamanho do ícone calibrado e salvo para esta área.";
         }
-        preview=std::move(chosen->image);break;
+        break;
     }
     case NewStatus:case AddPreset: {
         if(changed.statuses.size()>=64)throw std::runtime_error("O limite é de 64 status. Exclua um status sem regras para criar outro.");
@@ -416,7 +416,7 @@ void App::command(int id,int notification) {
             dialog.lpstrFilter=L"Imagem de referência (PNG/BMP)\0*.png;*.bmp\0";dialog.lpstrFile=path;dialog.nMaxFile=32768;dialog.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST;
             if(!GetOpenFileNameW(&dialog))return;image=aa::loadImage(path);
         }
-        status->referencePath=storeImage(status->id,image);status->builtinAssassin=false;status->stacks.clear();preview=std::move(image);
+        status->referencePath=storeImage(status->id,image);status->builtinAssassin=false;status->stacks.clear();
         error=L"Referência salva. Cadastre novamente as amostras de stacks para esta imagem.";break;
     }
     case CaptureStack: {
@@ -484,6 +484,7 @@ void App::refreshStatus() {
         else if(!error.empty())state=L"Leitura: "+error;
         else state=L"Leitura ativa. Cada status é acompanhado na área indicada abaixo.";
     }
+    else if(page==0&&error.starts_with(L"Antes de iniciar:"))state=L"Leitura não iniciada. Veja as pendências em Leituras e destaques.";
     if(!hotkeyWarning.empty())state+=L"\n"+hotkeyWarning;
     setIfChanged(statusLabel,state);
     if(page!=0)return;
@@ -494,9 +495,12 @@ void App::refreshStatus() {
         if(target&&IsWindow(target)) {
             try{auto screen=screenOf(target);summary+=L"Jogo conectado: "+std::to_wstring(screen.width)+L" × "+std::to_wstring(screen.height)+L" px.\r\n";}catch(const std::exception&){summary+=L"Janela do jogo indisponível. Conecte novamente.\r\n";}
         } else summary+=L"Jogo ainda não conectado.\r\n";
-        const auto issues=aa::readinessIssues(workspace);
-        if(issues.empty())summary+=L"Configuração pronta para iniciar.\r\n";
-        else for(const auto& issue:issues)summary+=L"• "+issue+L"\r\n";
+        if(error.starts_with(L"Antes de iniciar:"))summary+=error;
+        else {
+            const auto issues=aa::readinessIssues(workspace);
+            if(issues.empty())summary+=L"Configuração pronta para iniciar.\r\n";
+            else for(const auto& issue:issues)summary+=L"• "+issue+L"\r\n";
+        }
     } else {
         const auto now=static_cast<std::int64_t>(GetTickCount64());
         for(std::size_t i=0;i<plan.readers.size();++i) {
@@ -521,6 +525,7 @@ void App::refreshStatus() {
 void App::paint() {
     PAINTSTRUCT paint{};const auto dc=BeginPaint(window,&paint);
     if(page==0||page==2) {
+        const auto& preview=page==0?capturePreview:referencePreview;
         const RECT bounds=page==0?RECT{px(24),px(486),px(832),px(602)}:RECT{px(282),px(330),px(544),px(521)};
         const auto brush=CreateSolidBrush(RGB(30,34,41));FillRect(dc,&bounds,brush);DeleteObject(brush);
         if(preview.valid()) {
@@ -531,7 +536,7 @@ void App::paint() {
             SetStretchBltMode(dc,COLORONCOLOR);StretchDIBits(dc,bounds.left+(bounds.right-bounds.left-width)/2,bounds.top+(bounds.bottom-bounds.top-height)/2,width,height,0,0,preview.width,preview.height,preview.bgra.data(),&info,DIB_RGB_COLORS,SRCCOPY);
         } else {
             SetBkMode(dc,TRANSPARENT);SetTextColor(dc,RGB(215,220,230));SelectObject(dc,font);auto message=bounds;
-            DrawTextW(dc,page==0?L"A imagem aparecerá ao iniciar a leitura.":L"Cadastre uma imagem de referência.",-1,&message,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+            DrawTextW(dc,page==0?(running?L"Aguardando a primeira captura do jogo...":L"Sem captura. Inicie a leitura após resolver as pendências."):L"Cadastre uma imagem de referência.",-1,&message,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
         }
     }
     EndPaint(window,&paint);

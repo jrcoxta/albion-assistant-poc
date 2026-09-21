@@ -1,6 +1,23 @@
 # Validação do Albion Assistant
 
-## Entrega atual: HUDs, status e sets separados
+## Correção atual: referência confundida com captura do jogo
+
+Base Git: `423e460f661e3b39ef03204dd8f701553c587af0`. Em 20/09/2026, o usuário mostrou o Monitor exibindo o ícone de referência após tentar iniciar com calibração pendente. O mesmo buffer servia à biblioteca, à seleção e à captura. A correção separa referência e captura, descarta a captura anterior antes de validar uma nova tentativa e identifica HUD, área e botão no aviso de calibração. O rodapé apresenta uma orientação curta; os detalhes do bloqueio permanecem no resumo rolável, inclusive quando a resolução/escala não corresponde à HUD.
+
+Critérios verificados: somente frames do capturador alimentam a prévia do Monitor; abrir Status não substitui essa captura; a referência continua na biblioteca; início bloqueado por calibração ou campo inválido não exibe imagem antiga; configurações inválidas não são gravadas; a orientação de resolução/escala continua visível. Não houve mudança no reconhecimento, nas regras ou no formato dos dados.
+
+Evidências:
+
+- **APROVADO — regressão:** antes do patch, `app_flow` falhou com “referência do status apareceu como captura após início bloqueado”. A revisão independente identificou o caso de campo inválido antes da limpeza; a regressão falhou antes da correção e passou depois. O ajuste do rodapé também teve regressão de tela incompatível reproduzida e corrigida.
+- **APROVADO — testes:** 13/13 suítes passaram em Debug na primeira correção; após os ajustes da revisão, `app_flow` Debug foi recompilado e passou novamente. O build Release final executou 13/13 suítes com sucesso, publicou o EXE e conferiu seus recursos e hash. Evidências em `build/logs/Release.log` e `Release-validation.json` (base acima com alterações locais).
+- **APROVADO — interface estática:** coordenador e `/root/qa_validator` inspecionaram `build/logs/ui/ui-monitor-blocked.png` e `ui-monitor-screen-mismatch.png`, gerados pelas janelas do próprio teste. Mostram ausência de captura falsa, orientação completa e rodapé sem corte. A imagem da biblioteca foi conferida em `ui-status.png`. Isso não é teste sobre o jogo.
+- **APROVADO — revisão de lógica/UX:** `/root/qa_validator`, somente leitura, reconferiu o diff final e executou `app_flow` Debug independentemente, com saída zero. Nenhum P0/P1/P2 remanescente nesse escopo.
+- **APROVADO — entrega independente:** o mesmo revisor conferiu as 13/13 suítes do Release final e executou empacotamento e validador contra o EXE publicado; ambos passaram. Confirmou arquivo único, tamanho e SHA-256 igual ao build.
+- **PENDENTE — jogo real:** calibração, captura, reconhecimento e overlay na HUD física de 34 polegadas após esta correção. O snapshot do usuário tinha `iconCalibrated=0` na origem `meu-personagem`; o programa deve continuar bloqueando até calibrar. O frame usado na regressão é uma imagem de teste entregue ao consumidor de captura, não uma prova de captura real. Nenhum dado de AppData foi alterado pela implementação.
+
+Artefato publicado: somente `dist/AlbionAssistant.exe`, **677.376 bytes**, SHA-256 **`34FD68A374FF165D6AF0E130873478B92B747371A26E3A94384934F3178369BD`**. O usuário fechou o aplicativo antes da atualização. O commit que contém este registro preserva o diff validado.
+
+## Entrega anterior: HUDs, status e sets separados
 
 Base Git: `0eb22d54dfc959e4fbbaf9ace58fced58dd99f94`, diff desta entrega incluindo arquivos novos. Os critérios foram registrados em [modelo.md](modelo.md) antes da implementação. O usuário testou o programa anterior e relatou que funcionou muito bem; esse retorno não substitui a validação das mudanças atuais.
 

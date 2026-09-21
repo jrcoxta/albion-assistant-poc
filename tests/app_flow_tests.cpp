@@ -90,6 +90,41 @@ int wmain(int argc,wchar_t** argv){
         choose(app,HudList,1);require(app.workspace.activeHudId==L"h2"&&app.workspace.activeSetId==L"set1"&&app.set()->rules[0].condition.stacks==3,"troca de HUD alterou o set");
         choose(app,SetList,1);require(app.workspace.activeHudId==L"h2"&&app.workspace.activeSetId==L"set2","troca de set alterou a HUD");choose(app,SetList,0);
 
+        app.hud()->areas[0].iconCalibrated=false;
+        tab(app,2);app.start();
+        require(app.page==0&&!app.running&&app.recognizers.empty()&&app.overlays.empty(),"origem sem calibração iniciou leitura");
+        require(!app.capturePreview.valid(),"referência do status apareceu como captura após início bloqueado");
+        require(app.referencePreview.valid(),"início bloqueado perdeu a referência da biblioteca");
+        require(app.error.find(L"Meus status")!=std::wstring::npos&&app.error.find(L"Monitor 34")!=std::wstring::npos&&
+            app.error.find(L"Calibrar tamanho do ícone")!=std::wstring::npos,"aviso não informa a HUD, a área e como calibrar");
+        screenshot(app,pictures,L"ui-monitor-blocked.png");
+        app.hud()->areas[0].iconCalibrated=true;
+        require(aa::readinessIssues(app.workspace).empty(),"calibração válida manteve pendência");
+        // Um frame entregue pelo capturador só pode ser substituído por outra captura.
+        const aa::Image captured{250,60,std::vector<std::uint8_t>(250*60*4,37)};
+        app.running=true;app.latestSource=app.source;app.latestImage=captured;app.pending=true;app.consume();app.stop();
+        require(app.capturePreview.bgra==captured.bgra,"Monitor não recebeu o frame capturado");
+        tab(app,2);
+        require(app.capturePreview.width==captured.width&&app.capturePreview.height==captured.height&&app.capturePreview.bgra==captured.bgra,
+            "abrir Status substituiu a captura pela referência");
+        app.hud()->areas[0].iconCalibrated=false;app.start();
+        require(!app.capturePreview.valid(),"nova tentativa bloqueada preservou captura da sessão anterior");
+        app.hud()->areas[0].iconCalibrated=true;
+        app.capturePreview=captured;
+        const auto savedValidity=app.workspace.validityMs;
+        SetWindowTextW(app.item(Validity),L"");bool invalidStart=false;
+        try{app.start();}catch(const std::exception&){invalidStart=true;app.stop();}
+        require(invalidStart&&!app.capturePreview.valid(),"campo inválido manteve captura antiga na tentativa de iniciar");
+        require(app.workspace.validityMs==savedValidity&&aa::loadWorkspace(app.workspacePath,{}).validityMs==savedValidity,
+            "início com campo inválido alterou ajuste salvo");
+        SetWindowTextW(app.item(Validity),std::to_wstring(savedValidity).c_str());
+        app.hud()->clientWidth=900;app.start();
+        require(!app.running&&std::any_of(app.controls.begin(),app.controls.end(),[](HWND control){
+            return text(control).find(L"A HUD não corresponde à resolução/escala atual")!=std::wstring::npos;
+        }),"orientação de tela incompatível desapareceu ao resumir o rodapé");
+        screenshot(app,pictures,L"ui-monitor-screen-mismatch.png");
+        app.hud()->clientWidth=800;
+
         tab(app,1);require(app.item(DeleteHud)&&app.item(AreaName)&&!app.item(RuleName)&&!app.item(CaptureStatus),"HUD mistura regras ou status");
         screenshot(app,pictures,L"ui-huds.png");
         SetWindowTextW(app.item(HudName),L"Ultrawide");tab(app,2);require(app.hud()->name==L"Ultrawide","navegação perdeu nome da HUD");
