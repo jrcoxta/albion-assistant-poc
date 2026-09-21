@@ -23,11 +23,23 @@ template<class F> void rejected(F action, const char* message) {
     check(failed, message);
 }
 struct TemporaryDirectory {
-    std::filesystem::path path = std::filesystem::temp_directory_path() /
-        (L"albion-workspace-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
-    TemporaryDirectory() { std::filesystem::create_directory(path); }
+    inline static unsigned sequence = 0;
+    std::filesystem::path path;
+    explicit TemporaryDirectory(ULONGLONG tick = GetTickCount64()) : path(std::filesystem::temp_directory_path() /
+        (L"albion-workspace-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(tick) + L"-" + std::to_wstring(++sequence))) {
+        if (!std::filesystem::create_directory(path)) throw std::runtime_error("pasta temporaria de teste ja existe");
+    }
     ~TemporaryDirectory() { std::error_code ignored; std::filesystem::remove_all(path, ignored); }
 };
+void temporaryIsolation() {
+    const auto tick = GetTickCount64();
+    TemporaryDirectory first(tick);
+    {
+        TemporaryDirectory second(tick);
+        check(first.path != second.path, "temporarios criados no mesmo instante compartilham pasta");
+    }
+    check(std::filesystem::exists(first.path), "limpeza de um temporario removeu outro ainda em uso");
+}
 std::string bytes(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
     return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
@@ -303,7 +315,7 @@ void readiness() {
 }
 }
 int main() {
-    try { roundtripAndIsolation(); invalidData(); migration(); readiness(); }
+    try { temporaryIsolation(); roundtripAndIsolation(); invalidData(); migration(); readiness(); }
     catch (const std::exception& error) { std::cerr << "FALHOU: " << error.what() << '\n'; return 1; }
     std::cout << checks << " verificacoes de workspace, 0 falhas\n";
     return 0;

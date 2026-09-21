@@ -507,7 +507,7 @@ std::vector<std::wstring> readinessIssues(const Workspace& w) {
             if (!source->iconCalibrated || source->iconSize < 24 || source->iconSize > 256 ||
                 source->iconSize > source->region.width || source->iconSize > source->region.height)
                 issue(L"em HUDs, escolha a HUD “" + hud->name + L"”, selecione a área “" + source->name +
-                    L"” e clique em “Calibrar tamanho do ícone”.");
+                    L"” e clique em “Medir ícone de status”.");
         }
         if (!target) issue(L"região de destino inexistente: " + rule.targetArea);
         else if (!inBounds(*hud, target->region)) issue(L"região de destino não está calibrada dentro da HUD.");

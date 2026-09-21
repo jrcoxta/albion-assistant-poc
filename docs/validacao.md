@@ -1,6 +1,20 @@
 # Validação do Albion Assistant
 
-## Correção atual: referência confundida com captura do jogo
+## Correção atual: medição de ícone somente para busca de status
+
+Base Git: `aa640987f44e8ecc6f75807d455a5499971acdc8`, diff desta entrega. Em 21/09/2026, o usuário confirmou que a leitura e o destaque funcionaram, mas mostrou a HUD oferecendo medição tanto para E (destino) quanto para Q (área ainda sem regra). A origem `meu-personagem` já estava medida em 40 px. O problema corrigido é a apresentação de uma exigência de leitura como se fosse necessária para destacar uma habilidade.
+
+Critérios: destino exclusivo mostra somente a seleção da área e dispensa medição; área sem regra apresenta medição opcional; origem e uso duplo mantêm medição; usos configurados consideram todos os sets, inclusive regras desativadas, com `sameName`. Essa classificação é apenas visual: os bloqueios continuam seguindo as regras habilitadas do set ativo. Medidas salvas são preservadas e reaparecem se a área passar a ser origem. Nenhum campo/schema, regra ou algoritmo de reconhecimento foi alterado. O botão e a orientação de início usam “Medir ícone de status”.
+
+- **APROVADO — regressão de interface:** o teste novo falhou antes do patch com “destino E pede medição de ícone”. Depois, `app_flow` Debug passou cobrindo destino sem medida e com medida salva, Q sem regra, área sem coordenadas, origem sem medida, uso duplo em outro set desativado, troca de set e persistência.
+- **APROVADO — isolamento do teste:** o primeiro Release foi bloqueado por acesso inválido em `workspace`. Pastas remanescentes do processo falho mostraram o cenário Custom reutilizando o `workspace.ini` vazio de outra fixture: o nome usava PID e relógio sem diferenciar criações no mesmo instante. A regressão determinística com timestamp igual reproduziu a colisão. O helper de teste agora usa contador por processo e exige pasta nova; a correção não altera código do aplicativo. `workspace` Debug passou com 93 verificações, incluindo isolamento e limpeza de temporários coexistentes.
+- **APROVADO — produto/arquitetura e visual:** `/root/product_validator` revisou o diff e os quatro PNGs `build/logs/ui/ui-hud-{destino,sem-regra,uso-duplo,leitura}.png`. Textos completos, legíveis e sem sobreposição nesses estados; nenhum achado bloqueante. A correção do helper de teste também foi revisada.
+- **APROVADO — QA de lógica/visual:** `/root/qa_validator` revisou os mesmos estados e o helper, executou independentemente `app_flow` e `workspace` Debug finais, ambos com saída zero. Nenhum P0/P1/P2 remanescente no código revisado.
+- **APROVADO — build e publicação:** Release canônico final passou nas 13/13 suítes e publicou somente `dist/AlbionAssistant.exe`, **678.400 bytes**, SHA-256 **`8472958CE20A8FDA6208074FB811C1044F88CC28E35456D2CA480EBED534CC89`**. Evidências finais em `build/logs/Release.log` e `Release-validation.json`; a execução inicialmente reprovada não publicou o artefato.
+- **APROVADO — entrega independente:** QA executou `app_flow` Release e três execuções consecutivas de `workspace` Release (93/0 em todas), além de empacotamento e validador de entrega. Conferiu as 13 suítes do relatório canônico, o item único em `dist`, o tamanho e a igualdade do SHA-256 entre build e publicação.
+- **PENDENTE — nova sessão no jogo:** o relato positivo do usuário refere-se ao programa anterior a esta alteração de interface. Não foi repetida a seleção/captura/ação sobre o jogo nesta entrega. A implementação não alterou os dados reais do usuário; a conferência de AppData manteve SHA-256 `988CE316A260EFA645473C50765C0ABDC4F4A550299792B49E9269C54A2944F4`.
+
+## Correção anterior: referência confundida com captura do jogo
 
 Base Git: `423e460f661e3b39ef03204dd8f701553c587af0`. Em 20/09/2026, o usuário mostrou o Monitor exibindo o ícone de referência após tentar iniciar com calibração pendente. O mesmo buffer servia à biblioteca, à seleção e à captura. A correção separa referência e captura, descarta a captura anterior antes de validar uma nova tentativa e identifica HUD, área e botão no aviso de calibração. O rodapé apresenta uma orientação curta; os detalhes do bloqueio permanecem no resumo rolável, inclusive quando a resolução/escala não corresponde à HUD.
 

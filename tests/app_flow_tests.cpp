@@ -27,6 +27,7 @@ LRESULT CALLBACK testProc(HWND window,UINT message,WPARAM wp,LPARAM lp){
 }
 void tab(App& app,int page){app.command(Tab0+page,BN_CLICKED);require(app.page==page,"navegação não mudou de página");}
 void choose(App& app,int id,int index,bool list=false){SendMessageW(app.item(id),list?LB_SETCURSEL:CB_SETCURSEL,index,0);app.command(id,list?LBN_SELCHANGE:CBN_SELCHANGE);}
+bool shows(App& app,const wchar_t* phrase){return std::any_of(app.controls.begin(),app.controls.end(),[&](HWND control){return text(control).find(phrase)!=std::wstring::npos;});}
 void confirmDeleteHud(App& app,int answer){
     // Responde exclusivamente ao diálogo pertencente a esta janela/processo de teste.
     const DWORD ownerThread=GetCurrentThreadId();std::atomic<bool> answered=false;
@@ -96,7 +97,7 @@ int wmain(int argc,wchar_t** argv){
         require(!app.capturePreview.valid(),"referência do status apareceu como captura após início bloqueado");
         require(app.referencePreview.valid(),"início bloqueado perdeu a referência da biblioteca");
         require(app.error.find(L"Meus status")!=std::wstring::npos&&app.error.find(L"Monitor 34")!=std::wstring::npos&&
-            app.error.find(L"Calibrar tamanho do ícone")!=std::wstring::npos,"aviso não informa a HUD, a área e como calibrar");
+            app.error.find(L"Medir ícone de status")!=std::wstring::npos,"aviso não informa a HUD, a área e como calibrar");
         screenshot(app,pictures,L"ui-monitor-blocked.png");
         app.hud()->areas[0].iconCalibrated=true;
         require(aa::readinessIssues(app.workspace).empty(),"calibração válida manteve pendência");
@@ -126,6 +127,36 @@ int wmain(int argc,wchar_t** argv){
         app.hud()->clientWidth=800;
 
         tab(app,1);require(app.item(DeleteHud)&&app.item(AreaName)&&!app.item(RuleName)&&!app.item(CaptureStatus),"HUD mistura regras ou status");
+        {
+            const auto original=app.workspace;
+            app.hud()->areas.push_back({L"Q",{380,400,64,64},48,false});
+            choose(app,AreaList,1,true);
+            require(!app.item(CalibrateArea)&&shows(app,L"Não precisa medir ícone"),"destino E pede medição de ícone");
+            require(aa::readinessIssues(app.workspace).empty(),"destino não medido bloqueia a regra");
+            screenshot(app,pictures,L"ui-hud-destino.png");
+            app.area()->iconCalibrated=true;app.area()->iconSize=57;app.makeUI();
+            require(!app.item(CalibrateArea)&&!shows(app,L"57 px"),"destino mostra medição de ícone sem uso");
+            choose(app,AreaList,2,true);
+            require(app.item(CalibrateArea)&&shows(app,L"opcional")&&!shows(app,L"pendente"),"área Q sem regra apresenta medição como pendência");
+            screenshot(app,pictures,L"ui-hud-sem-regra.png");
+            app.area()->region={};app.makeUI();
+            require(!IsWindowEnabled(app.item(CalibrateArea)),"medição habilitada antes de selecionar a área");
+            choose(app,AreaList,0,true);app.area()->iconCalibrated=false;app.makeUI();
+            require(IsWindowEnabled(app.item(CalibrateArea))&&!aa::readinessIssues(app.workspace).empty(),"origem deixou de exigir medição");
+            screenshot(app,pictures,L"ui-hud-leitura.png");
+            app.area()->iconCalibrated=true;
+            auto other=rule;other.id=L"r-other";other.sourceArea=L"HABILIDADE E";other.targetArea=L"Meus status";other.condition.enabled=false;
+            app.workspace.sets[1].rules.push_back(other);app.makeUI();choose(app,AreaList,1,true);
+            require(app.item(CalibrateArea)&&shows(app,L"buscar status e receber destaque")&&app.area()->iconSize==57,
+                "uso duplo em outro set perdeu medição salva ou foi ignorado");
+            screenshot(app,pictures,L"ui-hud-uso-duplo.png");
+            tab(app,0);choose(app,SetList,1);tab(app,1);choose(app,AreaList,1,true);
+            require(app.item(CalibrateArea)&&shows(app,L"buscar status e receber destaque"),"uso da HUD depende apenas do set ativo");
+            app.saveEditor();const auto saved=aa::loadWorkspace(app.workspacePath,{});
+            require(saved.huds[1].areas[1].iconCalibrated&&saved.huds[1].areas[1].iconSize==57&&
+                saved.sets[0].rules[0].targetArea==original.sets[0].rules[0].targetArea,"interface alterou medição ou regra salva");
+            app.commit(original);app.selectedArea=0;app.makeUI();
+        }
         screenshot(app,pictures,L"ui-huds.png");
         SetWindowTextW(app.item(HudName),L"Ultrawide");tab(app,2);require(app.hud()->name==L"Ultrawide","navegação perdeu nome da HUD");
         require(app.item(StatusName)&&app.item(CaptureStack)&&!app.item(HudName)&&!app.item(RuleName),"Status mistura outros editores");
