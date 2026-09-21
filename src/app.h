@@ -8,6 +8,7 @@
 #include <mutex>
 #include "workspace.h"
 #include "monitor.h"
+#include "predictive_clock.h"
 #include "capture.h"
 #include "recognition.h"
 #include "overlay.h"
@@ -55,6 +56,8 @@ struct App {
     std::vector<std::unique_ptr<Overlay>> overlays;
     std::unique_ptr<Overlay> testOverlay;
     std::vector<aa::Observation> current, latest, lastReadings;
+    std::vector<aa::PredictiveClock> clocks;
+    std::vector<aa::ClockPrediction> clockPredictions;
     std::vector<bool> lit;
     std::mutex mutex;
     std::atomic<bool> pending=false;

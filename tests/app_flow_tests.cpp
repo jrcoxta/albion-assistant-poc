@@ -218,6 +218,22 @@ int wmain(int argc,wchar_t** argv){
         const auto readingNow=static_cast<std::int64_t>(GetTickCount64());
         app.current=app.lastReadings;app.current.front().capturedMs=readingNow;app.evaluateReadings(readingNow,true);
         require(app.lit.front(),"controle positivo não acendeu com leitura recente e alvo em foco");
+        app.plan.actions.front().rule.followClock=true;app.plan.readers.front().needsClock=true;
+        for(int n=0;n<10;++n){
+            app.current.front().capturedMs=1000+n*150;
+            app.current.front().detection.remainingFraction=.95f-n*.03f;
+            app.evaluateReadings(1000+n*150,true);
+        }
+        app.current.front().capturedMs=2500;app.current.front().detection.remainingFraction.reset();
+        const auto predicted=app.evaluateReadings(2500,true);
+        require(app.lit.front()&&predicted.front()&&*predicted.front()<.70f&&*predicted.front()>.60f,
+                "aro sumiu ao encobrir relogio apesar de status atual e velocidade consistente");
+        require(!app.current.front().detection.remainingFraction,"estimativa sobrescreveu observacao original");
+        app.current.front().detection.stacks=2u;
+        require(!app.evaluateReadings(2510,true).front()&&!app.lit.front(),"previsao manteve destaque com stacks incorretos");
+        app.current.front().detection.stacks=3u;
+        require(!app.evaluateReadings(2520,false).front()&&!app.lit.front(),"previsao manteve destaque fora do jogo");
+        require(!app.evaluateReadings(2530,true).front(),"previsao atravessou pausa sem reaprender");
         app.current={{{},0,app.source}};app.evaluateReadings(readingNow,true);
         require(!app.lit.front(),"histórico acendeu destaque sem captura atual com jogo em foco");
         app.current=app.lastReadings;app.current.front().capturedMs=readingNow-app.workspace.validityMs;

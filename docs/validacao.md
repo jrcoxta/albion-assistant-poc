@@ -1,5 +1,16 @@
 # Validação do Albion Assistant
 
+## Em validação: aro preditivo por status
+
+Base `1372325`, 21/09/2026. Usuário autorizou prever o relógio e ajustar seu término ao desaparecimento observado. Critérios: projeção contínua entre leituras radiais; presença/stacks atuais continuam controlando a ação; renovação reinicia o ciclo; captura inválida, pausa, fonte diferente e leituras expiradas invalidam previsão; observação original preservada; aprendizado separado por leitor e limitado à sessão. Término antecipado só pode ser aprendido após múltiplos ciclos concordantes, nunca com um desaparecimento isolado.
+
+Abordagem conferida previamente por `/root/prediction_product`. Limite: capturas não distinguem expiração natural de consumo repetido no mesmo instante; a duração aprendida é aproximada. Não há desconto fixo por ping nem porcentagem fixa do Espírito Assassino. A sequência real anterior desaparece entre os frames 472/473 enquanto a fração bruta é 0,330556; extrapolar aquela curva até zero atrasaria cerca de 2,44 s. Um único ciclo não calibra o término de produção.
+
+- **APROVADO — continuidade em capturas reais:** replay isolado de `dense-after.csv` processou os 361 frames com 3 stacks. Antes, 250 continham fração radial observada; agora todos os 361 recebem uma fração, incluindo os 54 frames do trecho encoberto 380–433. Isto valida continuidade sobre este corpus, não a precisão do término aprendido, pois ele contém apenas um ciclo.
+- **APROVADO — algoritmo e integração:** `/root/prediction_product` aprovou a integração, preservando presença, stacks, foco, validade, fonte e a observação original. `/root/prediction_qa` aprovou o replay e os testes isolados. A revisão encontrou um P2: um término aprendido podia esvaziar o aro apesar de leituras posteriores de 20% e 10%. Foi corrigido e reproduzido: essas leituras descartam o término e voltam a ser exibidas como observadas.
+- **APROVADO — build e publicação:** build canônico Release em 21/09/2026 às 14:16 (Brasília), 15/15 testes aprovados. Único `dist/AlbionAssistant.exe`, SHA-256 `F8E2381BF06682BD3F1DE094BFDC2B775B4616DD6C9D5D1D229F93B917FE37D9`, conferido em `build/logs/Release-validation.json`. Configuração real preservada: SHA-256 `F370D7031B97F6C8D1CA2201DF90513B3F79DA83DDAD8672C82215A910A4CC81`.
+- **PENDENTE — teste no jogo:** validar ao menos três ciclos naturais completos na mesma sessão; o aprendizado do término só entra após esses ciclos. Consumo repetido, renovação inteiramente encoberta e diferenças do servidor continuam limitações explícitas.
+
 ## Correção atual: evidência impossível na grade do relógio
 
 Base `35803d5`, 21/09/2026. O usuário relatou que o timer some embora o contador do buff continue. O diagnóstico independente `/root/timer_diagnosis` reproduziu exatamente os resultados de 361 frames com 3 stacks: 250 com fração, 111 sem ela. Desses 111, dez falhavam somente porque a janela angular oferecia quatro pixels corretos e o código exigia cinco; 66 tinham ambiguidade angular e 35 não tinham contraste temporal. A reprodução usa PNGs locais, sem rede, portanto o ping não explica essas perdas.

@@ -334,7 +334,7 @@ void App::makeUI() {
             chosenColor=add(colors,L"Cor salva");SendMessageW(colors,CB_SETITEMDATA,chosenColor,rule()->condition.color);
         }
         choose(colors,chosenColor);
-        control(L"BUTTON",L"Acompanhar relógio do status (experimental)",WS_TABSTOP|BS_AUTOCHECKBOX,282,474,550,26,FollowClock);
+        control(L"BUTTON",L"Aro com previsão de tempo (experimental)",WS_TABSTOP|BS_AUTOCHECKBOX,282,474,550,26,FollowClock);
         SendMessageW(item(FollowClock),BM_SETCHECK,rule()&&rule()->followClock?BST_CHECKED:BST_UNCHECKED,0);
         control(L"STATIC",L"",0,282,505,550,41,RulePhrase);
         control(L"STATIC",L"",0,282,588,550,24,ClockHint);
@@ -436,7 +436,7 @@ void App::updateRuleChoices() {
     if(canFollow&&SendMessageW(item(FollowClock),BM_GETCHECK,0,0)==BST_CHECKED) {
         std::error_code ignored;
         const bool hasReference=status&&(!status->clockReferencePath.empty()?std::filesystem::is_regular_file(status->clockReferencePath,ignored):status->builtinAssassin);
-        clockHint=hasReference?L"Aro segue o buff; início/fim e oclusões podem ocultá-lo.":L"Relógio sem referência. Capture em Status; a aura continua ativa.";
+        clockHint=hasReference?L"Aprende nesta sessão; término estimado após ciclos semelhantes.":L"Relógio sem referência. Capture em Status; a aura continua ativa.";
     }
     setIfChanged(item(ClockHint),clockHint);
     auto phrase=std::wstring(L"Quando ")+(status?status->name:L"o status escolhido")+L", na área "+(text(item(SourceArea)).empty()?L"de origem":text(item(SourceArea)))+L", ";
@@ -677,6 +677,8 @@ void App::refreshStatus() {
                     if(i>=recognizers.size()||!recognizers[i]->clockReady())summary+=L" · relógio indisponível: capture a referência na aba Status";
                     else if(detection.remainingFraction)summary+=L" · relógio observado: "+std::to_wstring(static_cast<int>(*detection.remainingFraction*100))+L"%";
                     else summary+=L" · relógio sem leitura confiável";
+                    if(i<current.size()&&shown==&current[i]&&i<clockPredictions.size()&&clockPredictions[i].estimated&&clockPredictions[i].fraction)
+                        summary+=L" · aro estimado: "+std::to_wstring(static_cast<int>(*clockPredictions[i].fraction*100))+L"%";
                 }
             }
             summary+=L"\r\n";

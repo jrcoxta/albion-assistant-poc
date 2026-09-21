@@ -134,7 +134,7 @@ void App::stop(){
     if(badge)ShowWindow(badge,SW_HIDE);
     for(auto& o:overlays)o->update(target,{},false);overlays.clear();
     if(testOverlay)testOverlay->update(target,{},false);
-    recognizers.clear();current.clear();lastReadings.clear();lit.assign(plan.actions.size(),false);
+    recognizers.clear();current.clear();lastReadings.clear();clocks.clear();clockPredictions.clear();lit.assign(plan.actions.size(),false);
     {std::lock_guard lock(mutex);latest.clear();latestSource=0;latestImage={};latestError.clear();pending=false;}
 }
 void App::start(){
@@ -188,8 +188,18 @@ void App::consume(){
 }
 std::vector<std::optional<float>> App::evaluateReadings(std::int64_t now,bool targetReady){
     std::vector<std::optional<float>> remaining(plan.actions.size());
-    if(running&&targetReady)lit=aa::evaluateMonitor(plan,current,now,workspace.validityMs,source,&remaining);
-    else lit.assign(plan.actions.size(),false);
+    clockPredictions.assign(plan.readers.size(),{});
+    if(running&&targetReady&&current.size()==plan.readers.size()){
+        if(clocks.size()!=plan.readers.size())clocks.assign(plan.readers.size(),{});
+        auto predicted=current;
+        for(std::size_t i=0;i<current.size();++i)if(plan.readers[i].needsClock){
+            clockPredictions[i]=clocks[i].update(current[i],now,workspace.validityMs,source);
+            predicted[i].detection.remainingFraction=clockPredictions[i].fraction;
+        }
+        lit=aa::evaluateMonitor(plan,predicted,now,workspace.validityMs,source,&remaining);
+    }else{
+        clocks.clear();lit.assign(plan.actions.size(),false);
+    }
     return remaining;
 }
 void App::updateHighlight(){
