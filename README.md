@@ -17,6 +17,8 @@ F8 abre o painel; F9 inicia ou para a leitura. O destaque apaga quando o jogo pe
 
 As configurações ficam em **`%LOCALAPPDATA%\AlbionAssistant`**: `settings.ini`, `hud-profiles`, `samples` e diagnósticos quando ativados. Atualizar o EXE ou limpar o build não altera esses dados. O parâmetro opcional `--settings caminho.ini` usa uma configuração e pasta de dados explícitas.
 
+Quem ainda tiver dados de um build antigo ao lado do EXE deve fechar o aplicativo e copiar `settings.ini`, `hud-profiles` e as referências personalizadas para a pasta de dados antes de usar o executável atual. Não sobrescreva arquivos/perfis já existentes: preserve os originais e confira as referências pelo painel. Não há importação automática de pastas antigas. Os dados deste ambiente já foram migrados durante a consolidação.
+
 Salve uma HUD para cada resolução/layout, por exemplo “Notebook” e “Monitor 34”. Os perfis guardam posições, tamanho do ícone, resolução, monitor e DPI conhecidos. O programa sugere uma configuração compatível; você escolhe qual carregar. Calibrar outro ambiente preserva o perfil salvo anterior. A mudança de layout dentro do jogo exige nova seleção ou troca manual do perfil.
 
 Use **Salvar HUD e ação** antes de carregar outra HUD ou criar uma nova para conservar edições. Carregar restaura a versão salva. Nova HUD mantém a última ação e referência salvas e inicia outra calibração. Um nome já utilizado por outra HUD não pode sobrescrevê-la.
@@ -30,6 +32,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-windows.ps1
 ```
 
 Esse comando configura, compila, executa os testes e publica **`dist/AlbionAssistant.exe`** somente após aprovação dos testes. Execuções seguintes são incrementais. O progresso é resumido; o log completo fica em `build/logs/Release.log`.
+
+O build recusa arquivos extras em `dist`, falha se nenhum teste for encontrado e confere o EXE publicado, incluindo seu SHA-256. O resultado automático fica em `build/logs/Release-validation.json`. A revisão independente segue [docs/processo.md](docs/processo.md); os pareceres e testes visuais pendentes ficam em [docs/validacao.md](docs/validacao.md). Passar no build não aprova automaticamente a interface no jogo.
 
 - `-Configuration Debug`: compila e testa para desenvolvimento, sem substituir a entrega Release.
 - `-Clean`: recria apenas o cache da configuração escolhida, preservando os dados do usuário.

@@ -12,3 +12,12 @@
 - Recursos do reconhecimento, ícone, manifesto e metadados ficam embutidos no EXE. Configurações, perfis e amostras vivem em %LOCALAPPDATA%/AlbionAssistant; nunca apagar dados do usuário ao recompilar ou limpar build.
 - Não recriar nem executar smoke-windows.ps1; incidente Kaspersky pendente no projeto anterior. Não alterar antivírus ou exclusões.
 - Cada agente edita apenas seus arquivos designados. Não commit/push por subagentes. Testes de regras e reconhecimento devem continuar ativos em Release.
+
+## Validação independente obrigatória
+
+- Seguir [docs/processo.md](docs/processo.md) em cada entrega. Definir critérios observáveis antes de implementar; testar o resultado contra eles.
+- Delegar revisão a subagentes independentes do autor. Em features, mudanças de interface, persistência ou build, usar dois revisores: produto/arquitetura e QA. Em correções pequenas, um revisor pode reunir esses papéis; o autor nunca é o único aprovador.
+- Os revisores recebem requisito, critérios, base Git e diff atual; não herdam o raciocínio do implementador. Revisão é somente leitura, sem subdelegação ou alterações no checkout. QA pode gerar logs de testes; coordenar comandos para não disputar build/logs.
+- Corrigir achados bloqueantes, repetir os testes afetados e pedir nova conferência ao mesmo revisor. Não ignorar achados nem entrar em repetição sem diagnóstico. Mudanças posteriores invalidam a aprovação do escopo afetado.
+- Build bloqueia entrega com arquivos extras, testes vazios/falhos ou EXE publicado diferente do testado. Não desativar validadores para conseguir publicar. Não apagar arquivos inesperados automaticamente.
+- Registrar pareceres identificados, evidências e pendências em docs/validacao.md, atualizado no mesmo arquivo e versionado pelo Git. Build aprovado não significa interface/jogo aprovado; informar APROVADO, REPROVADO ou PENDENTE por escopo.
