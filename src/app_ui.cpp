@@ -106,7 +106,7 @@ void validateNewName(App& app,int id,const std::wstring& name){
     aa::Workspace values;
     try{values=app.editorValues();}
     catch(const std::exception& error){throw std::runtime_error(std::string("Cancele este cadastro e corrija a edição anterior: ")+error.what());}
-    if(id==NewHud)checkName(values.huds,L"",name);
+    if(id==NewHud||id==HudName)checkName(values.huds,id==HudName?values.activeHudId:L"",name);
     else if(id==NewStatus)checkName(values.statuses,L"",name);
     else if(id==NewSet)checkName(values.sets,L"",name);
     else if(id==NewArea){
@@ -137,13 +137,13 @@ INT_PTR CALLBACK namePromptProc(HWND dialog,UINT message,WPARAM wp,LPARAM lp){
                 SendMessageW(field,WM_SETFONT,reinterpret_cast<WPARAM>(app.font),FALSE);theme::styleControl(field,id==IDOK?theme::Role::Primary:theme::Role::Normal);return field;
             };
             control(L"STATIC",L"Nome",0,24,20,432,22,0);
-            const auto name=control(L"EDIT",L"",WS_TABSTOP|WS_BORDER|ES_AUTOHSCROLL,24,46,432,30,710);
+            const auto name=control(L"EDIT",prompt->name.c_str(),WS_TABSTOP|WS_BORDER|ES_AUTOHSCROLL,24,46,432,30,710);
             SendMessageW(name,EM_SETLIMITTEXT,251,0);
             control(L"STATIC",prompt->hint,0,24,89,432,44,0);
             control(L"STATIC",L"",0,24,140,432,44,711);
-            control(L"BUTTON",L"Criar",WS_TABSTOP|BS_DEFPUSHBUTTON,228,196,108,32,IDOK);
+            control(L"BUTTON",prompt->command==HudName?L"Salvar":L"Criar",WS_TABSTOP|BS_DEFPUSHBUTTON,228,196,108,32,IDOK);
             control(L"BUTTON",L"Cancelar",WS_TABSTOP|BS_PUSHBUTTON,348,196,108,32,IDCANCEL);
-            SetFocus(name);return FALSE;
+            SetFocus(name);SendMessageW(name,EM_SETSEL,0,-1);return FALSE;
         }
         if(message==WM_PAINT){PAINTSTRUCT paint{};auto dc=BeginPaint(dialog,&paint);RECT bounds{};GetClientRect(dialog,&bounds);theme::fill(dc,bounds,theme::Background);EndPaint(dialog,&paint);return TRUE;}
         if(message==WM_CLOSE){EndDialog(dialog,IDCANCEL);return TRUE;}
@@ -161,6 +161,7 @@ INT_PTR CALLBACK namePromptProc(HWND dialog,UINT message,WPARAM wp,LPARAM lp){
 std::optional<std::wstring> requestName(App& app,int id){
     NamePrompt prompt{app,id,L"Nova regra",L"Depois de criar, escolha o status, a condição e o destaque.",{}};
     if(id==NewHud){prompt.title=L"Nova HUD";prompt.hint=L"Use um nome para esta tela ou layout, como Monitor 34.\nDepois, selecione as áreas do jogo.";}
+    else if(id==HudName){prompt.title=L"Renomear HUD";prompt.hint=L"Altere o nome desta HUD. Suas áreas e regras serão mantidas.";prompt.name=app.hud()->name;}
     else if(id==NewArea){prompt.title=L"Nova área";prompt.hint=L"Use um nome como Meus status ou E.\nDepois, selecione onde essa área fica no jogo.";}
     else if(id==NewStatus){prompt.title=L"Novo status";prompt.hint=L"Dê um nome ao buff ou debuff.\nDepois, capture ou importe sua imagem.";}
     else if(id==NewSet){prompt.title=L"Novo perfil";prompt.hint=L"Use o nome da arma ou do conjunto que está usando.\nDepois, adicione suas regras.";}
@@ -235,6 +236,7 @@ void App::makeUI() {
     auto list=[&](int id,int x,int y,int width,int height) {return control(L"LISTBOX",L"",WS_TABSTOP|WS_BORDER|WS_VSCROLL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT|LBS_OWNERDRAWFIXED|LBS_HASSTRINGS,x,y,width,height,id);};
     auto hudChoices=[&](int x,int y,int width) {
         auto field=combo(HudList,x,y,width);for(const auto& value:workspace.huds)add(field,value.name);
+        if(page==0)add(field,L"+ Criar HUD");
         choose(field,indexOf(workspace.huds,workspace.activeHudId));
     };
     auto setChoices=[&](int x,int y,int width) {
@@ -267,9 +269,8 @@ void App::makeUI() {
             button(firstHud?L"Criar HUD":L"Criar outra HUD",NewHud,64,462,300);
             theme::styleControl(item(NewHud),theme::Role::Primary);
         } else {
-        label(L"HUDs salvas",24,136,350);hudChoices(24,158,350);
-        label(L"Nome da HUD",394,136,268);edit(hud()?hud()->name.c_str():L"",HudName,394,158,268);
-        button(L"Nova HUD",NewHud,680,156,152);button(L"Excluir HUD",DeleteHud,680,198,152);
+        label(L"HUD selecionada",24,136,628);hudChoices(24,158,628);
+        button(L"Opções da HUD",HudOptions,670,156,162);
         auto screen=hud()&&hud()->clientWidth>0?std::to_wstring(hud()->clientWidth)+L" × "+std::to_wstring(hud()->clientHeight)+L" px · DPI "+std::to_wstring(hud()->monitorDpi):L"A tela será registrada ao selecionar a primeira área.";
         label(screen.c_str(),24,207,632,38);
         if(hud()->areas.empty()) {
@@ -433,7 +434,6 @@ aa::Workspace App::editorValues() {
     auto changed=workspace;
     if(page==3&&item(Validity))changed.validityMs=number(Validity,1,60000);
     if(page==0)if(auto currentHud=byId(changed.huds,changed.activeHudId)) {
-        currentHud->name=nameFrom(item(HudName));checkName(changed.huds,currentHud->id,currentHud->name);
         if(selectedArea>=0&&selectedArea<static_cast<int>(currentHud->areas.size())) {
             auto name=nameFrom(item(AreaName));
             for(std::size_t i=0;i<currentHud->areas.size();++i)if(static_cast<int>(i)!=selectedArea&&aa::sameName(currentHud->areas[i].name,name))
@@ -511,6 +511,25 @@ void App::updateRuleChoices() {
 
 void App::command(int id,int notification) {
     if(rebuilding||selecting)return;
+    if(id==HudList&&notification==CBN_SELCHANGE&&page==0&&selection(item(HudList))==static_cast<int>(workspace.huds.size())){
+        choose(item(HudList),indexOf(workspace.huds,workspace.activeHudId));
+        command(NewHud,BN_CLICKED);return;
+    }
+    if(id==HudOptions&&notification==BN_CLICKED&&hud()){
+        const auto menu=CreatePopupMenu();
+        if(!menu)throw std::runtime_error("Não foi possível abrir as opções da HUD.");
+        AppendMenuW(menu,MF_STRING,HudName,L"Renomear HUD");
+        AppendMenuW(menu,MF_SEPARATOR,0,nullptr);
+        AppendMenuW(menu,MF_STRING,DeleteHud,L"Excluir HUD");
+        RECT anchor{};GetWindowRect(item(HudOptions),&anchor);
+        const auto action=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTALIGN,anchor.right,anchor.bottom,0,window,nullptr);
+        DestroyMenu(menu);if(action)command(static_cast<int>(action),BN_CLICKED);return;
+    }
+    if(id==HudName&&notification==BN_CLICKED&&hud()){
+        const auto name=requestName(*this,HudName);if(!name)return;
+        auto changed=editorValues();byId(changed.huds,changed.activeHudId)->name=*name;
+        commit(std::move(changed));error=L"HUD renomeada.";makeUI();return;
+    }
     if(id==ShareOverlay&&notification==BN_CLICKED){
         const bool visible=SendMessageW(item(ShareOverlay),BM_GETCHECK,0,0)==BST_CHECKED;
         auto changed=workspace;changed.shareOverlayInCapture=visible;commit(std::move(changed));showOverlayInCapture=visible;

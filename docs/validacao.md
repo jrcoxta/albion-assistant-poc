@@ -1,5 +1,14 @@
 # Validação do Albion Assistant
 
+## Ações da HUD selecionada — 22/09/2026
+
+Base `c3d2212`. O seletor da aba HUDs contém “+ Criar HUD”; Opções da HUD reúne Renomear/Excluir. O campo permanente de nome e os botões avulsos de criar/excluir foram removidos. Renomear abre nome atual com Salvar/Cancelar e atualiza cabeçalho/seletor após persistir, preservando identidade e áreas.
+
+- **APROVADO — automação:** 15/15 testes no build Release. Criação exercita a entrada final do seletor; cancelamento preserva seleção; renomeação atualiza cabeçalho/seletor, mantém identidade e grava nome em disco; vazio é rejeitado.
+- **APROVADO — revisão estática independente:** `/root/hud_review` e `/root/hud_qa`, sem achados pendentes após adaptar duas expectativas antigas dos testes ao novo desenho.
+- **APROVADO — publicação:** após fechamento autorizado pelo usuário, build canônico concluiu com 15/15 testes e substituiu o único `dist/AlbionAssistant.exe`. SHA-256 `A2280F1E10781D92BA506D0A1DF7AD1472FD40F09DFB92BD32C17D78B44B2AC3`.
+- **Visual parcial:** conferida a tela publicada em instância com dados isolados: seletor e Opções da HUD visíveis, campo permanente e botões avulsos ausentes. Teste manual do menu interrompido por detecção de interação do usuário; menu e diálogo ainda pendentes de conferência manual completa. Renomeação, persistência e atualização de nomes aprovadas nos testes automáticos. Instância isolada encerrada para liberar abertura com os dados reais.
+
 ## Cadastro com nome antes de criar — 22/09/2026
 
 Base `4dec3e9`. Ajuste autorizado pelo usuário: primeiro item recebe nome na própria aba; itens adicionais usam formulário Criar/Cancelar. HUDs, áreas, status, perfis e regras seguem o mesmo padrão. Inclui correções de estados vazios, preview nas abas corretas, persistência das escolhas e limpeza de amostras/relógio ao trocar o status de uma regra.

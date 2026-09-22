@@ -57,7 +57,12 @@ void createNamed(App& app,int command,const wchar_t* name,bool cancel=false,bool
             if(context.handled){answered=true;break;}Sleep(10);
         }
     });
-    try{app.command(command,BN_CLICKED);}catch(...){responder.join();throw;}
+    try{
+        if(command==NewHud&&app.page==0&&app.item(HudList)){
+            SendMessageW(app.item(HudList),CB_SETCURSEL,app.workspace.huds.size(),0);
+            app.command(HudList,CBN_SELCHANGE);
+        }else app.command(command,BN_CLICKED);
+    }catch(...){responder.join();throw;}
     responder.join();require(answered,"cadastro deve pedir nome antes de criar");
 }
 void confirmDeleteHud(App& app,int answer){
@@ -118,7 +123,7 @@ int wmain(int argc,wchar_t** argv){
         app.window=CreateWindowExW(0,cls.lpszClassName,L"Validação do painel",WS_OVERLAPPED|WS_CAPTION,20,20,880,740,nullptr,nullptr,app.instance,&app);
         app.target=CreateWindowExW(0,L"STATIC",L"Alvo do teste",WS_POPUP,0,0,800,600,nullptr,nullptr,app.instance,nullptr);
         require(app.window&&app.target,"janelas de teste não criadas");app.makeUI();
-        require(app.item(NewHud)!=nullptr&&!app.item(Start),"abertura deve começar no cadastro de HUDs, não no monitor");
+        require(app.item(HudList)!=nullptr&&!app.item(HudName)&&!app.item(NewHud)&&!app.item(Start),"HUD existente deve ter seletor sem formulário de nome/criação");
         require(!IsWindowVisible(app.window)&&!app.rebuilding,"construção mostrou janela originalmente oculta ou deixou bloqueio ativo");
         {
             app.commit({});app.makeUI();
@@ -181,13 +186,9 @@ int wmain(int argc,wchar_t** argv){
             require(app.workspace.huds.size()==3&&app.hud()->name==L"HUD criada uma vez",
                     "criar HUD exige outro Novo ou deixa nome provisório");
             const auto selected=app.workspace.activeHudId;
-            SetWindowTextW(app.item(HudName),L"Rascunho preservado");
-            app.command(HudName,EN_CHANGE);
-            require(shows(app,L"Alteração não salva"),"editar nome não informa que falta salvar");
             createNamed(app,NewHud,L"Cancelado",true);
-            require(app.workspace.huds.size()==3&&app.workspace.activeHudId==selected&&app.hud()->name==L"HUD criada uma vez"&&text(app.item(HudName))==L"Rascunho preservado",
+            require(app.workspace.huds.size()==3&&app.workspace.activeHudId==selected&&app.hud()->name==L"HUD criada uma vez",
                     "cancelar criação salvou, perdeu rascunho ou mudou seleção");
-            SetWindowTextW(app.item(HudName),L"HUD criada uma vez");
             createNamed(app,NewHud,L"   ",false,true);createNamed(app,NewHud,L"hud criada uma vez",false,true);
             require(app.workspace.huds.size()==3&&app.workspace.activeHudId==selected,"nome inválido ou repetido criou HUD");
             createNamed(app,NewArea,L"Buffs criados uma vez");
@@ -298,7 +299,7 @@ int wmain(int argc,wchar_t** argv){
         screenshot(app,pictures,L"ui-monitor-screen-mismatch.png");
         app.hud()->clientWidth=800;
 
-        tab(app,1);require(app.item(DeleteHud)&&app.item(AreaName)&&!app.item(RuleName)&&!app.item(CaptureStatus),"HUD mistura regras ou status");
+        tab(app,1);require(app.item(HudOptions)&&!app.item(HudName)&&!app.item(NewHud)&&!app.item(DeleteHud)&&app.item(AreaName)&&!app.item(RuleName)&&!app.item(CaptureStatus),"HUD mistura ações ou outros cadastros");
         {
             const auto original=app.workspace;
             app.hud()->areas.push_back({L"Q",{380,400,64,64},48,false});
@@ -336,7 +337,14 @@ int wmain(int argc,wchar_t** argv){
             app.commit(original);app.selectedArea=0;app.makeUI();
         }
         screenshot(app,pictures,L"ui-huds.png");
-        SetWindowTextW(app.item(HudName),L"Ultrawide");tab(app,2);require(app.hud()->name==L"Ultrawide","navegação perdeu nome da HUD");
+        createNamed(app,HudName,L"Ultrawide");
+        require(app.hud()->name==L"Ultrawide"&&text(app.item(HudList))==L"Ultrawide"&&shows(app,L"HUD ativa: Ultrawide"),"renomear deve atualizar seletor e cabeçalho juntos");
+        require(aa::loadWorkspace(app.workspacePath,{}).activeHudId==app.workspace.activeHudId,"renomear mudou a identidade da HUD");
+        const auto renamed=aa::loadWorkspace(app.workspacePath,{});
+        require(std::any_of(renamed.huds.begin(),renamed.huds.end(),[&](const auto& h){return h.id==app.workspace.activeHudId&&h.name==L"Ultrawide";}),"nome renomeado não persistiu");
+        createNamed(app,HudName,L"Cancelado",true);require(app.hud()->name==L"Ultrawide","cancelar renomeação alterou HUD");
+        createNamed(app,HudName,L"   ",false,true);require(app.hud()->name==L"Ultrawide","nome vazio alterou HUD");
+        tab(app,2);
         require(app.item(StatusName)&&!app.item(StatusKind)&&!app.item(AddPreset)&&!app.item(CaptureStack)&&!app.item(HudName)&&!app.item(RuleName),"Status exibe opcoes que pertencem a regra");
         SetWindowTextW(app.item(StatusName),L"");app.rebuildUIWithDraft();require(text(app.item(StatusName)).empty()&&app.selectedStatus()->name==L"Espírito Assassino","DPI perdeu rascunho ou gravou texto inválido");
         SetWindowTextW(app.item(StatusName),L"Carga da adaga");tab(app,3);require(app.workspace.statuses[0].name==L"Carga da adaga"&&app.rule()->statusId==L"s1","renomear status quebrou vínculo");
