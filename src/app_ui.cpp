@@ -279,21 +279,15 @@ void App::makeUI() {
         for(const auto& value:workspace.statuses)add(statuses,value.name,true);
         if(!selectedStatus()&&!workspace.statuses.empty())selectedStatusId=workspace.statuses.front().id;
         choose(statuses,indexOf(workspace.statuses,selectedStatusId),true);
-        label(L"Nome do status",282,136,352);edit(selectedStatus()?selectedStatus()->name.c_str():L"",StatusName,282,160,352);
-        label(L"Tipo",652,136,180);auto kind=combo(StatusKind,652,160,180);add(kind,L"Buff");add(kind,L"Debuff");choose(kind,selectedStatus()&&selectedStatus()->debuff?1:0);
-        button(L"Capturar referência",CaptureStatus,282,211,170);button(L"Importar imagem",ImportStatus,464,211,170);button(L"Adicionar exemplo",AddPreset,646,211,186);
+        label(L"Nome do status",282,136,550);edit(selectedStatus()?selectedStatus()->name.c_str():L"",StatusName,282,160,550);
+        button(L"Capturar referência",CaptureStatus,282,211,258);button(L"Importar imagem",ImportStatus,558,211,274);
         const auto status=selectedStatus();
         const auto referenceInfo=status?std::wstring(status->builtinAssassin?L"Identidade: exemplo incluído.":status->referencePath.empty()?L"Identidade: capture ou importe uma referência.":L"Identidade: referência salva.")+L"\nRelógio: "+(!status->clockReferencePath.empty()?L"referência salva.":status->builtinAssassin?L"referência do exemplo incluída.":L"referência ainda não capturada."):L"Crie um status para cadastrar qualquer buff ou debuff.";
         label(referenceInfo.c_str(),282,255,550,44);
-        label(L"Imagem de referência",282,304,260);label(L"Amostras de stacks",568,304,264);
-        auto stacks=list(StackList,568,330,264,151);
-        if(selectedStatus())for(auto value:aa::stackValues(*selectedStatus())) {
-            const auto row=add(stacks,std::to_wstring(value)+L" stacks",true);SendMessageW(stacks,LB_SETITEMDATA,row,value);
-        }
-        choose(stacks,0,true);button(L"Excluir amostra selecionada",DeleteStack,568,491,264);
+        label(L"Imagem de referência",282,304,550);
         button(L"Capturar relógio",CaptureClock,282,491,260);
         button(L"Novo status",NewStatus,24,547,112);button(L"Excluir status",DeleteStatus,148,547,114);
-        label(L"Valor",282,551,58);edit(L"1",SampleValue,344,549,54);button(L"Capturar amostra",CaptureStack,410,547,216);button(L"Salvar status",Save,644,547,188);
+        button(L"Salvar status",Save,644,547,188);
         label(L"Renove o status antes de capturar o relógio; selecione o ícone inteiro, sem sombra.",24,584,808,24);
         referencePreview={};
         if(selectedStatus()) {
@@ -302,7 +296,7 @@ void App::makeUI() {
                 else if(selectedStatus()->builtinAssassin)referencePreview=aa::loadImageResource(IDR_ASSASSIN_NONE);
             }catch(const std::exception& e){error=L"Não foi possível abrir a referência: "+widen(e.what());}
         }
-        for(int id:{StatusName,StatusKind,CaptureStatus,ImportStatus,DeleteStatus,SampleValue,CaptureStack,StackList,DeleteStack,CaptureClock,Save})EnableWindow(item(id),selectedStatus()!=nullptr);
+        for(int id:{StatusName,CaptureStatus,ImportStatus,DeleteStatus,CaptureClock,Save})EnableWindow(item(id),selectedStatus()!=nullptr);
     } else {
         label(L"Sets salvos",24,136,284);setChoices(24,158,284);
         label(L"Nome do set",326,136,326);edit(set()?set()->name.c_str():L"",SetName,326,158,326);
@@ -336,7 +330,11 @@ void App::makeUI() {
             chosenColor=add(colors,L"Cor salva");SendMessageW(colors,CB_SETITEMDATA,chosenColor,rule()->condition.color);
         }
         choose(colors,chosenColor);
-        control(L"BUTTON",L"Aro com previsão de tempo (experimental)",WS_TABSTOP|BS_AUTOCHECKBOX,282,474,550,26,FollowClock);
+        if(rule()&&rule()->condition.condition==aa::Condition::StacksEqual) {
+            label(L"Nova amostra",282,474,94);edit(std::to_wstring(rule()->condition.stacks).c_str(),SampleValue,378,472,58);
+            button(L"Capturar amostra",CaptureRuleStack,446,470,160);
+        }
+        control(L"BUTTON",L"Aro com previsão de tempo (experimental)",WS_TABSTOP|BS_AUTOCHECKBOX,620,474,212,26,FollowClock);
         SendMessageW(item(FollowClock),BM_SETCHECK,rule()&&rule()->followClock?BST_CHECKED:BST_UNCHECKED,0);
         control(L"STATIC",L"",0,282,505,550,41,RulePhrase);
         control(L"STATIC",L"",0,282,588,550,24,ClockHint);
@@ -344,7 +342,7 @@ void App::makeUI() {
         button(L"Subir",MoveRuleUp,24,574,112);button(L"Descer",MoveRuleDown,148,574,114);
         button(L"Testar destaque por 5 s",TestAction,282,551,256);button(L"Salvar set e regra",Save,556,551,276);
         for(int id:{SetName,DeleteSet,NewRule,Save})EnableWindow(item(id),set()!=nullptr);
-        for(int id:{RuleName,Enabled,RuleStatus,SourceArea,ConditionBox,Stacks,EffectBox,TargetArea,Color,SampleColor,TestAction,DeleteRule,MoveRuleUp,MoveRuleDown})EnableWindow(item(id),rule()!=nullptr);
+        for(int id:{RuleName,Enabled,RuleStatus,SourceArea,ConditionBox,Stacks,EffectBox,TargetArea,Color,SampleColor,CaptureRuleStack,TestAction,DeleteRule,MoveRuleUp,MoveRuleDown})EnableWindow(item(id),rule()!=nullptr);
         updateRuleChoices();
     }
     statusLabel=control(L"STATIC",L"",0,36,627,784,39);theme::styleControl(statusLabel);
@@ -357,7 +355,7 @@ void App::rebuildUIWithDraft() {
     struct Draft {int id;std::wstring value;LRESULT selected;};
     std::vector<Draft> edits,choices;
     for(int id:{HudName,AreaName,StatusName,SampleValue,SetName,RuleName,Validity})if(item(id))edits.push_back({id,text(item(id)),0});
-    for(int id:{StatusKind,RuleStatus,SourceArea,TargetArea,ConditionBox,Stacks,EffectBox,Color})if(item(id))choices.push_back({id,text(item(id)),selection(item(id))});
+    for(int id:{RuleStatus,SourceArea,TargetArea,ConditionBox,Stacks,EffectBox,Color})if(item(id))choices.push_back({id,text(item(id)),selection(item(id))});
     const auto enabled=item(Enabled)?SendMessageW(item(Enabled),BM_GETCHECK,0,0):BST_UNCHECKED;
     const auto followClock=item(FollowClock)?SendMessageW(item(FollowClock),BM_GETCHECK,0,0):BST_UNCHECKED;
     const auto stackSelected=item(StackList)?selection(item(StackList),true):-1;
@@ -387,7 +385,6 @@ aa::Workspace App::editorValues() {
     }
     if(page==2)if(auto status=byId(changed.statuses,selectedStatusId)) {
         status->name=nameFrom(item(StatusName));checkName(changed.statuses,status->id,status->name);
-        status->debuff=selection(item(StatusKind))==1;
     }
     if(page==3)if(auto currentSet=byId(changed.sets,changed.activeSetId)) {
         currentSet->name=nameFrom(item(SetName));checkName(changed.sets,currentSet->id,currentSet->name);
@@ -442,7 +439,7 @@ void App::updateRuleChoices() {
     }
     setIfChanged(item(ClockHint),clockHint);
     auto phrase=std::wstring(L"Quando ")+(status?status->name:L"o status escolhido")+L", na área "+(text(item(SourceArea)).empty()?L"de origem":text(item(SourceArea)))+L", ";
-    if(needsStacks&&values.empty())phrase=L"Cadastre uma amostra de stacks desse status na aba Status para usar esta condição.";
+    if(needsStacks&&values.empty())phrase=L"Informe o valor e capture uma amostra deste status ao lado.";
     else if(needsStacks&&active<0)phrase=L"Escolha um valor de stacks cadastrado. O valor anterior não tem amostra para este status.";
     else {
         phrase+=needsStacks?L"tiver "+text(stackControl)+L" stacks":selection(item(ConditionBox))==1?L"estiver ausente":L"estiver presente";
@@ -461,7 +458,7 @@ void App::command(int id,int notification) {
         error=visible?L"Overlay incluído no compartilhamento.":L"Overlay oculto em capturas e compartilhamentos.";refreshStatus();return;
     }
     if((notification==EN_CHANGE&&(id==HudName||id==AreaName||id==StatusName||id==SetName||id==RuleName||id==Validity))||
-       (notification==CBN_SELCHANGE&&(id==StatusKind||id==RuleStatus||id==ConditionBox||id==Stacks||id==EffectBox||id==Color||id==SourceArea||id==TargetArea))||
+       (notification==CBN_SELCHANGE&&(id==RuleStatus||id==ConditionBox||id==Stacks||id==EffectBox||id==Color||id==SourceArea||id==TargetArea))||
        (notification==BN_CLICKED&&(id==Enabled||id==FollowClock))){
         error=L"Alterações pendentes. Use Salvar; trocar de item ou seção também salva.";refreshStatus();
     }
@@ -514,7 +511,7 @@ void App::command(int id,int notification) {
         makeUI();return;
     }
     const bool action=id==NewHud||id==DeleteHud||id==NewArea||id==DeleteArea||id==SelectArea||id==CalibrateArea||id==NewStatus||id==DeleteStatus||
-        id==CaptureStatus||id==ImportStatus||id==CaptureStack||id==DeleteStack||id==AddPreset||id==NewSet||id==DeleteSet||id==NewRule||id==DeleteRule||id==MoveRuleUp||id==MoveRuleDown;
+        id==CaptureStatus||id==ImportStatus||id==CaptureStack||id==CaptureRuleStack||id==DeleteStack||id==AddPreset||id==NewSet||id==DeleteSet||id==NewRule||id==DeleteRule||id==MoveRuleUp||id==MoveRuleDown;
     if(!action)return;
     std::optional<std::wstring> newName;
     if(createsItem(id)){newName=requestName(*this,id);if(!newName)return;}
@@ -594,6 +591,20 @@ void App::command(int id,int notification) {
         auto found=std::find_if(status->stacks.begin(),status->stacks.end(),[&](const auto& entry){return entry.value==value;});
         if(found==status->stacks.end())status->stacks.push_back({value,path});else found->path=path;
         error=L"Amostra de "+std::to_wstring(value)+L" stacks salva.";break;
+    }
+    case CaptureRuleStack: {
+        if(!currentSet||selectedRule<0||selectedRule>=static_cast<int>(currentSet->rules.size()))throw std::runtime_error("Escolha uma regra primeiro.");
+        auto& currentRule=currentSet->rules[static_cast<std::size_t>(selectedRule)];
+        auto* ruleStatus=byId(changed.statuses,currentRule.statusId);
+        if(!ruleStatus||(!ruleStatus->builtinAssassin&&ruleStatus->referencePath.empty()))throw std::runtime_error("Cadastre a referência do status antes da amostra de stacks.");
+        const auto value=static_cast<unsigned>(number(SampleValue,1,99));auto chosen=pick(aa::SelectionKind::Icon,nullptr);
+        if(!chosen){error=L"Captura da amostra cancelada.";refreshStatus();return;}
+        aa::Recognizer validator;
+        if(!validator.setStackReference(value,chosen->image))throw std::runtime_error("Não identifiquei um contador branco legível no canto inferior direito. Capture o ícone inteiro enquanto o número estiver visível.");
+        const auto path=storeImage(ruleStatus->id,chosen->image);
+        auto found=std::find_if(ruleStatus->stacks.begin(),ruleStatus->stacks.end(),[&](const auto& entry){return entry.value==value;});
+        if(found==ruleStatus->stacks.end())ruleStatus->stacks.push_back({value,path});else found->path=path;
+        currentRule.condition.stacks=value;error=L"Amostra de "+std::to_wstring(value)+L" stacks salva.";break;
     }
     case DeleteStack: {
         if(!status)return;const auto row=selection(item(StackList),true);if(row<0)throw std::runtime_error("Escolha a amostra de stacks para excluir.");

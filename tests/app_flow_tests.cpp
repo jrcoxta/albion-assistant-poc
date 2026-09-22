@@ -309,11 +309,12 @@ int wmain(int argc,wchar_t** argv){
         }
         screenshot(app,pictures,L"ui-huds.png");
         SetWindowTextW(app.item(HudName),L"Ultrawide");tab(app,2);require(app.hud()->name==L"Ultrawide","navegação perdeu nome da HUD");
-        require(app.item(StatusName)&&app.item(CaptureStack)&&!app.item(HudName)&&!app.item(RuleName),"Status mistura outros editores");
+        require(app.item(StatusName)&&!app.item(StatusKind)&&!app.item(AddPreset)&&!app.item(CaptureStack)&&!app.item(HudName)&&!app.item(RuleName),"Status exibe opcoes que pertencem a regra");
         SetWindowTextW(app.item(StatusName),L"");app.rebuildUIWithDraft();require(text(app.item(StatusName)).empty()&&app.selectedStatus()->name==L"Espírito Assassino","DPI perdeu rascunho ou gravou texto inválido");
         SetWindowTextW(app.item(StatusName),L"Carga da adaga");tab(app,3);require(app.workspace.statuses[0].name==L"Carga da adaga"&&app.rule()->statusId==L"s1","renomear status quebrou vínculo");
         require(app.item(RuleName)&&!app.item(StatusName)&&!app.item(HudName),"Regras misturam outros editores");
         require(SendMessageW(app.item(ConditionBox),CB_GETCURSEL,0,0)==2&&text(app.item(Stacks))==L"3","condição ou stack incorreto na edição");
+        require(app.item(CaptureRuleStack),"regra de stacks nao oferece captura da propria amostra");
         screenshot(app,pictures,L"ui-regras.png");
         require(SendMessageW(app.item(EffectBox),CB_GETCOUNT,0,0)==4&&app.item(SampleColor),"efeitos e captura de cor ausentes");
         require(app.item(FollowClock)&&SendMessageW(app.item(FollowClock),BM_GETCHECK,0,0)==BST_UNCHECKED,"opcao de acompanhar relogio ausente ou ligada no legado");
