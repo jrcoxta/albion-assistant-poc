@@ -33,20 +33,27 @@ float digitScore(const Image& roi,Region icon,const Image& reference) {
     float best=0;
     // The real counter is white with a black outline, in the lower right.
     // Comparing its silhouette never derives stacks from the icon's color.
-    const int firstX=icon.width*53/100,firstY=icon.height*49/100;
-    const int lastX=icon.width*94/100,lastY=icon.height*98/100;
+    const int firstX=icon.width*56/100,firstY=icon.height*56/100;
+    const int lastX=icon.width*88/100,lastY=icon.height*92/100;
     // O relógio pode trocar a referência de identidade vencedora; os recortes
     // reais diferem alguns pixels em relação ao aro. Alinhar o dígito de forma
     // independente evita confundir essa variação com um contador ilegível.
     const int alignment=std::max(1,icon.width/16);
-    for(int dy=-alignment;dy<=alignment;++dy) for(int dx=-alignment;dx<=alignment;++dx) {
-        int expected=0,observed=0,intersection=0;
-        for(int y=firstY;y<lastY;++y) for(int x=firstX;x<lastX;++x) {
-            const bool a=white(reference,x*reference.width/icon.width,y*reference.height/icon.height);
-            const bool b=white(roi,icon.x+x+dx,icon.y+y+dy);
-            expected+=a; observed+=b; intersection+=a && b;
+    // Uma seleção manual pode incluir poucos pixels de margem. Tentar recortes
+    // simétricos pequenos preserva o tamanho do dígito sem baixar a confiança.
+    const int extra=reference.width-icon.width;
+    const int maxTrim=extra>0&&extra<=10?std::min(4,extra/2):0;
+    for(int trim=0;trim<=maxTrim;++trim) {
+        const int scaledWidth=reference.width-2*trim,scaledHeight=reference.height-2*trim;
+        for(int dy=-alignment;dy<=alignment;++dy) for(int dx=-alignment;dx<=alignment;++dx) {
+            int expected=0,observed=0,intersection=0;
+            for(int y=firstY;y<lastY;++y) for(int x=firstX;x<lastX;++x) {
+                const bool a=white(reference,trim+x*scaledWidth/icon.width,trim+y*scaledHeight/icon.height);
+                const bool b=white(roi,icon.x+x+dx,icon.y+y+dy);
+                expected+=a; observed+=b; intersection+=a && b;
+            }
+            if(expected>=3 && observed>=3) best=std::max(best,2.f*intersection/(expected+observed));
         }
-        if(expected>=3 && observed>=3) best=std::max(best,2.f*intersection/(expected+observed));
     }
     return best;
 }
@@ -174,6 +181,25 @@ bool Recognizer::setStackReference(unsigned value,const Image& image) {
     stackReferences_.push_back({value,image});
     return true;
 }
+std::optional<unsigned> Recognizer::readStacks(const Image& image,Region icon) const {
+    float bestScore=0,secondScore=0;
+    unsigned bestValue=0;
+    std::array<float,100> classScores{};
+    for(const auto& reference:stackReferences_)
+        classScores[reference.value]=std::max(classScores[reference.value],digitScore(image,icon,reference.image));
+    // A margem compara valores distintos, não variantes do mesmo número.
+    for(unsigned value=1;value<classScores.size();++value) {
+        const float score=classScores[value];
+        if(score>bestScore) {
+            secondScore=bestScore;
+            bestScore=score;
+            bestValue=value;
+        }else secondScore=std::max(secondScore,score);
+    }
+    // Uma classe cadastrada sozinha também precisa atingir confiança alta.
+    if(bestScore>.80f&&bestScore-secondScore>.065f)return bestValue;
+    return {};
+}
 Detection Recognizer::recognizeNearSize(const Image& image,int iconSize,RegionShape searchShape) const {
     auto result=recognize(image,iconSize,searchShape);
     // A borda selecionada pode medir dois pixels além do ícone renderizado.
@@ -191,6 +217,22 @@ Detection Recognizer::recognizeNearSize(const Image& image,int iconSize,RegionSh
                (!timed||candidate.confidence>timed->confidence))timed=std::move(candidate);
         }
         if(timed)result.remainingFraction=timed->remainingFraction;
+    }
+    // A identidade já localizou o ícone; verificar só o contador em tamanhos
+    // vizinhos evita varrer novamente a área inteira da HUD por quadro.
+    if(result.presence==Presence::Present&&!result.stacks&&!stackReferences_.empty()) {
+        std::optional<unsigned> recovered;
+        for(int offset:{-1,1,-2,2,-3,3,-4,4}) {
+            const int size=iconSize+offset;
+            if(size<24||size>256||size>image.width||size>image.height)continue;
+            const int x=static_cast<int>(std::lround(result.icon.x+(iconSize-size)/2.0));
+            const int y=static_cast<int>(std::lround(result.icon.y+(iconSize-size)/2.0));
+            if(x<0||y<0||x+size>image.width||y+size>image.height)continue;
+            const auto candidate=readStacks(image,{x,y,size,size});
+            if(candidate&&recovered&&candidate!=recovered)return result;
+            if(candidate)recovered=candidate;
+        }
+        if(recovered){result.stacks=recovered;result.detail="Buff e contador reconhecidos";}
     }
     // Não reinterpretar uma captura inválida, uniforme ou ambígua. A tolerância
     // corrige somente o tamanho manual, sem diminuir os limiares de identidade.
@@ -296,22 +338,7 @@ Detection Recognizer::recognize(const Image& image,int iconSize,RegionShape sear
     out.presence=Presence::Present;
     out.icon={best.x,best.y,iconSize,iconSize};
     if(clockReady()) out.remainingFraction=radialRemaining(image,out.icon,clockReference_);
-    float bestScore=0,secondScore=0;
-    unsigned bestValue=0;
-    std::array<float,100> classScores{};
-    for(const auto& reference:stackReferences_)
-        classScores[reference.value]=std::max(classScores[reference.value],digitScore(image,out.icon,reference.image));
-    // A margem compara valores distintos, não variantes do mesmo número.
-    for(unsigned value=1;value<classScores.size();++value) {
-        const float score=classScores[value];
-        if(score>bestScore) {
-            secondScore=bestScore;
-            bestScore=score;
-            bestValue=value;
-        } else secondScore=std::max(secondScore,score);
-    }
-    // A margem entre classes não protege quando o número observado não foi cadastrado.
-    if(bestScore>.80f && bestScore-secondScore>.065f) out.stacks=bestValue;
+    out.stacks=readStacks(image,out.icon);
     out.detail=out.stacks?"Buff e contador reconhecidos":"Buff presente; contador desconhecido";
     return out;
 }

@@ -16,6 +16,7 @@ public:
     Detection recognizeNearSize(const Image& image, int iconSize, RegionShape searchShape=RegionShape::Rectangle) const;
 private:
     struct StackReference { unsigned value; Image image; };
+    std::optional<unsigned> readStacks(const Image& image,Region icon) const;
     std::vector<Image> references_;
     std::vector<StackReference> stackReferences_;
     Image clockReference_;

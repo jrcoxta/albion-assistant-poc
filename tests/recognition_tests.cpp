@@ -419,6 +419,44 @@ int main(int argc,char** argv) {
         const auto realNoCounter36=recognizer.recognizeNearSize(aa::loadImage(ultrawide/"present-no-counter.png"),36);
         check(realNoCounter36.presence==aa::Presence::Present&&!realNoCounter36.stacks,
               "Tolerancia ampliada inventou stacks sem numero visivel");
+        // Recortes reais salvos no cadastro: a imagem de 48 px inclui margem
+        // ao redor do icone de 40 px; a amostra de 44 px tem menos margem.
+        // Nenhuma delas pode confundir dois stacks ou um contador ilegivel.
+        for(const auto* sample:{"assassin-3-loose-44.png","assassin-3-loose-48.png"}) {
+            aa::Recognizer configured;
+            configured.setReference(aa::loadImage(ultrawide/"assassin-blank-40.png"));
+            check(configured.setStackReference(3,aa::loadImage(ultrawide/sample)),
+                  "Amostra real de tres stacks deve ser aceita");
+            for(const auto* name:{"stacks-3-start.png","stacks-3-middle.png","stacks-3-end.png"}) {
+                for(const int calibrated:{36,40}) {
+                    const auto detected=configured.recognizeNearSize(aa::loadImage(ultrawide/name),calibrated);
+                    check(detected.presence==aa::Presence::Present&&detected.stacks==3u,
+                          "Margem da amostra real deixou tres stacks desconhecidos");
+                }
+            }
+            for(const auto* name:{"stacks-2.png","present-no-counter.png","absent-before.png","absent-after.png"})
+                for(const int calibrated:{36,40})
+                    check(configured.recognizeNearSize(aa::loadImage(ultrawide/name),calibrated).stacks!=3u,
+                          "Margem da amostra real inventou tres stacks");
+        }
+        {
+            aa::Recognizer configured;
+            configured.setReference(aa::loadImage(ultrawide/"assassin-blank-40.png"));
+            check(configured.setStackReference(3,aa::loadImage(ultrawide/"assassin-3-loose-48.png")),
+                  "Amostra com margem deve ser aceita");
+            const auto frame=place(resize(aa::loadImage(ultrawide/"assassin-3-loose-44.png"),40),266,182,84,96);
+            const auto exact=configured.recognize(frame,36);
+            check(exact.presence==aa::Presence::Present&&!exact.stacks,
+                  "Regressao precisa reproduzir identidade presente e stacks desconhecidos");
+            check(configured.recognizeNearSize(frame,36).stacks==3u,
+                  "Presenca com contador desconhecido deve consultar escala vizinha do mesmo icone");
+            const auto highConfidence=place(resize(aa::loadImage(ultrawide/"assassin-3-loose-44.png"),39),266,182,84,96);
+            const auto exactHigh=configured.recognize(highConfidence,36);
+            check(exactHigh.presence==aa::Presence::Present&&exactHigh.confidence>=.95f&&!exactHigh.stacks,
+                  "Identidade forte tambem pode deixar o contador desconhecido");
+            check(configured.recognizeNearSize(highConfidence,36).stacks==3u,
+                  "Confianca da identidade nao deve bloquear leitura do contador vizinho");
+        }
         check(recognizer.recognizeNearSize({},38).presence==aa::Presence::Unknown,
               "Tolerancia aceitou captura invalida");
         auto ambiguous=aa::loadImage(ultrawide/"stacks-3-middle.png");
