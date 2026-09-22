@@ -62,10 +62,15 @@ std::unique_ptr<aa::Recognizer> makeRecognizer(const aa::MonitorReader& reader){
     if(reader.needsClock) {
         // O relógio é opcional: uma referência temporal ruim não desativa presença/stacks.
         try {
-            if(!reader.status.clockReferencePath.empty())recognizer->setClockReference(aa::loadImage(reader.status.clockReferencePath));
-            else if(reader.status.builtinAssassin ||
-                    (reference.valid()&&reference.width==reference.height&&
-                     aa::Recognizer().recognize(reference,reference.width).presence==aa::Presence::Present)){
+            const bool assassinClock=reader.status.builtinAssassin ||
+                (reference.valid()&&reference.width==reference.height&&
+                 aa::Recognizer().recognize(reference,reference.width).presence==aa::Presence::Present);
+            if(!reader.status.clockReferencePath.empty()){
+                if(recognizer->setClockReference(aa::loadImage(reader.status.clockReferencePath))&&assassinClock){
+                    const int resource=std::abs(reader.area.iconSize-40)<std::abs(reader.area.iconSize-64)?IDR_ASSASSIN_CLOCK_40:IDR_ASSASSIN_CLOCK;
+                    recognizer->setClockFallback(aa::loadImageResource(resource));
+                }
+            }else if(assassinClock){
                 const int resource=std::abs(reader.area.iconSize-40)<std::abs(reader.area.iconSize-64)?IDR_ASSASSIN_CLOCK_40:IDR_ASSASSIN_CLOCK;
                 recognizer->setClockReference(aa::loadImageResource(resource));
             }

@@ -476,6 +476,10 @@ int wmain(int argc,wchar_t** argv){
             require(makeRecognizer(clockReader)->clockReady(),"recapturar Espirito Assassino apagou o relogio conhecido");
             require(makeRecognizer(clockReader)->recognizeNearSize(liveClock,38).remainingFraction.has_value(),
                     "referencia personalizada do Assassino perdeu o timer no jogo");
+            clockReader.status.clockReferencePath=app.storeImage(L"clock-shadowed",aa::loadImageResource(IDR_ASSASSIN_NONE));
+            require(makeRecognizer(clockReader)->recognizeNearSize(liveClock,38).remainingFraction.has_value(),
+                    "referencia temporal sombreada escondeu o relogio limpo do Assassino");
+            clockReader.status.clockReferencePath.clear();
             clockReader.status.referencePath=app.storeImage(L"other",aa::loadImage(std::filesystem::path(__FILE__).parent_path().parent_path()/L"assets"/L"other-food.png"));
             require(!makeRecognizer(clockReader)->clockReady(),"status diferente herdou relogio do Assassino");
             app.makeUI();screenshot(app,pictures,L"ui-status-relogio.png");

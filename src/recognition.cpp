@@ -162,6 +162,7 @@ void Recognizer::setReference(const Image& image) {
     references_.clear();
     clearStackReferences();
     clockReference_={};
+    clockFallback_={};
     if(validReference(image)) references_.push_back(image);
 }
 void Recognizer::clearStackReferences() {
@@ -169,8 +170,15 @@ void Recognizer::clearStackReferences() {
 }
 bool Recognizer::setClockReference(const Image& image) {
     clockReference_={};
+    clockFallback_={};
     if(!validReference(image) || image.width!=image.height) return false;
     clockReference_=image;
+    return true;
+}
+bool Recognizer::setClockFallback(const Image& image) {
+    clockFallback_={};
+    if(!clockReady() || !validReference(image) || image.width!=image.height) return false;
+    clockFallback_=image;
     return true;
 }
 bool Recognizer::clockReady() const { return clockReference_.valid(); }
@@ -337,7 +345,10 @@ Detection Recognizer::recognize(const Image& image,int iconSize,RegionShape sear
     }
     out.presence=Presence::Present;
     out.icon={best.x,best.y,iconSize,iconSize};
-    if(clockReady()) out.remainingFraction=radialRemaining(image,out.icon,clockReference_);
+    if(clockReady()) {
+        out.remainingFraction=radialRemaining(image,out.icon,clockReference_);
+        if(!out.remainingFraction&&clockFallback_.valid())out.remainingFraction=radialRemaining(image,out.icon,clockFallback_);
+    }
     out.stacks=readStacks(image,out.icon);
     out.detail=out.stacks?"Buff e contador reconhecidos":"Buff presente; contador desconhecido";
     return out;
