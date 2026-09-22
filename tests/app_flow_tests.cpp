@@ -140,6 +140,12 @@ int wmain(int argc,wchar_t** argv){
         }
         const auto pictures=argc>1?std::filesystem::absolute(argv[1]):std::filesystem::path{};
         require(app.item(Start)&&!app.item(RuleName)&&!app.item(StatusName)&&!app.item(AreaName),"Monitor mistura editores");
+        require(app.item(ShareOverlay)&&SendMessageW(app.item(ShareOverlay),BM_GETCHECK,0,0)==BST_UNCHECKED,
+                "Monitor nao oferece compartilhamento do overlay desativado por padrao");
+        SendMessageW(app.item(ShareOverlay),BM_SETCHECK,BST_CHECKED,0);app.command(ShareOverlay,BN_CLICKED);
+        require(app.showOverlayInCapture&&app.workspace.shareOverlayInCapture&&
+                aa::loadWorkspace(app.workspacePath,{}).shareOverlayInCapture,
+                "compartilhamento do overlay nao atualizou e salvou a preferencia");
         screenshot(app,pictures,L"ui-monitor.png");
         {
             const auto original=app.workspace;

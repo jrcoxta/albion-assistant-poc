@@ -49,7 +49,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int show){
         App app;app.instance=instance;std::filesystem::path settingsFile;
         int argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);
         for(int i=1;i<argc;++i){const std::wstring arg=argv[i];if(arg==L"--settings"&&i+1<argc)settingsFile=argv[++i];else if(arg==L"--diagnostics")app.diagnostics=true;else if(arg==L"--show-overlay-in-capture")app.showOverlayInCapture=true;}
-        LocalFree(argv);app.showOverlayInCapture=app.showOverlayInCapture&&app.diagnostics;app.configureStorage(settingsFile);app.load();
+        LocalFree(argv);app.configureStorage(settingsFile);app.load();
         WNDCLASSW cls{};cls.hInstance=instance;cls.lpfnWndProc=appProc;cls.lpszClassName=AppWindowClass;cls.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(IDI_APP));cls.hCursor=LoadCursorW(nullptr,IDC_ARROW);
         RegisterClassW(&cls);const auto dpi=GetDpiForSystem();RECT bounds{0,0,MulDiv(860,dpi,96),MulDiv(700,dpi,96)};
         const auto style=WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX|WS_CLIPCHILDREN;AdjustWindowRectExForDpi(&bounds,style,FALSE,0,dpi);

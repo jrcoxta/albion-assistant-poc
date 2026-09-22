@@ -246,6 +246,8 @@ void App::makeUI() {
         label(L"Set de regras",430,136,402);setChoices(430,158,402);
         button(L"Conectar ao jogo",Connect,24,202,158);button(L"Iniciar leitura",Start,194,202,150);button(L"Parar",Stop,356,202,100);
         label(L"Validade da leitura (ms)",478,207,216);edit(std::to_wstring(workspace.validityMs).c_str(),Validity,702,204,130);
+        control(L"BUTTON",L"Mostrar overlay no compartilhamento",WS_TABSTOP|BS_AUTOCHECKBOX,478,231,354,18,ShareOverlay);
+        SendMessageW(item(ShareOverlay),BM_SETCHECK,showOverlayInCapture?BST_CHECKED:BST_UNCHECKED,0);
         label(L"Leituras e destaques",24,250,808);
         control(L"EDIT",L"",WS_TABSTOP|WS_BORDER|WS_VSCROLL|ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL,24,275,808,159,MonitorSummary);
         label(L"Última captura da área monitorada",24,449,620);button(L"Salvar ajuste",Save,664,444,168);
@@ -451,6 +453,13 @@ void App::updateRuleChoices() {
 
 void App::command(int id,int notification) {
     if(rebuilding||selecting)return;
+    if(id==ShareOverlay&&notification==BN_CLICKED){
+        const bool visible=SendMessageW(item(ShareOverlay),BM_GETCHECK,0,0)==BST_CHECKED;
+        auto changed=workspace;changed.shareOverlayInCapture=visible;commit(std::move(changed));showOverlayInCapture=visible;
+        for(auto& overlay:overlays)overlay->setCaptureVisible(visible);
+        if(testOverlay)testOverlay->setCaptureVisible(visible);
+        error=visible?L"Overlay incluído no compartilhamento.":L"Overlay oculto em capturas e compartilhamentos.";refreshStatus();return;
+    }
     if((notification==EN_CHANGE&&(id==HudName||id==AreaName||id==StatusName||id==SetName||id==RuleName||id==Validity))||
        (notification==CBN_SELCHANGE&&(id==StatusKind||id==RuleStatus||id==ConditionBox||id==Stacks||id==EffectBox||id==Color||id==SourceArea||id==TargetArea))||
        (notification==BN_CLICKED&&(id==Enabled||id==FollowClock))){

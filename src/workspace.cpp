@@ -201,6 +201,7 @@ Workspace readWorkspace(const std::filesystem::path& file) {
     Workspace w;
     w.nextId = in.number(L"workspace", L"nextId", std::numeric_limits<unsigned>::max());
     w.validityMs = static_cast<int>(in.number(L"workspace", L"validityMs", 60000));
+    if (in.contains(L"workspace", L"shareOverlayInCapture")) w.shareOverlayInCapture = in.number(L"workspace", L"shareOverlayInCapture", 1) != 0;
     w.activeHudId = in.text(L"workspace", L"activeHudId"); w.activeSetId = in.text(L"workspace", L"activeSetId");
     const auto hudCount = in.number(L"workspace", L"hudCount", static_cast<unsigned>(entityLimit));
     const auto statusCount = in.number(L"workspace", L"statusCount", static_cast<unsigned>(entityLimit));
@@ -409,7 +410,7 @@ void saveWorkspace(const std::filesystem::path& file, const Workspace& w) {
         const auto text = [&](const std::wstring& section, const wchar_t* key, const std::wstring& value) { write(section, key, L"\"" + value + L"\""); };
         const auto number = [&](const std::wstring& section, const wchar_t* key, auto value) { write(section, key, std::to_wstring(value)); };
         number(L"workspace", L"schema", 1); number(L"workspace", L"nextId", w.nextId);
-        number(L"workspace", L"validityMs", w.validityMs); text(L"workspace", L"activeHudId", w.activeHudId); text(L"workspace", L"activeSetId", w.activeSetId);
+        number(L"workspace", L"validityMs", w.validityMs); number(L"workspace", L"shareOverlayInCapture", w.shareOverlayInCapture ? 1 : 0); text(L"workspace", L"activeHudId", w.activeHudId); text(L"workspace", L"activeSetId", w.activeSetId);
         number(L"workspace", L"hudCount", w.huds.size()); number(L"workspace", L"statusCount", w.statuses.size()); number(L"workspace", L"setCount", w.sets.size());
         for (std::size_t i = 0; i < w.huds.size(); ++i) {
             const auto section = indexed(L"hud", i); const auto& h = w.huds[i];

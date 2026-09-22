@@ -83,4 +83,4 @@ O cadastro é genérico, mas a precisão depende do recorte e da aparência do s
 
 A captura usa DXGI e frames disponíveis, sem limitador fixo de 30/60 FPS nem fila crescente. Precisa de sessão Windows desbloqueada e jogo visível. Tela cheia exclusiva, HDR, monitor girado e janela distribuída entre monitores ainda não foram validados. Não há leitura de memória do jogo, injeção, interceptação de rede nem login automático.
 
-`--diagnostics` grava mudanças dos estados das ações na pasta de dados. `--diagnostics --show-overlay-in-capture` inclui os destaques na captura para inspeção; exige áreas de leitura e destaque separadas. As evidências e pendências estão em [docs/validacao.md](docs/validacao.md).
+`--diagnostics` grava mudanças dos estados das ações na pasta de dados. No **Monitor**, a opção **Mostrar overlay no compartilhamento** inclui os destaques no Discord e em outras capturas; ela fica desligada por padrão e é salva. `--show-overlay-in-capture` continua disponível para diagnóstico. As evidências e pendências estão em [docs/validacao.md](docs/validacao.md).

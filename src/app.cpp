@@ -98,7 +98,9 @@ void App::load(){
         // essa capacidade nas configurações importadas, sem herança nos cadastros novos.
         legacyStacks={{2,storeImage(L"legacy",aa::loadImageResource(IDR_ASSASSIN_2))},{3,storeImage(L"legacy",aa::loadImageResource(IDR_ASSASSIN_3))}};
     }
-    workspace=aa::loadWorkspace(workspacePath,settingsPath,legacyStacks);if(!workspace.statuses.empty())selectedStatusId=workspace.statuses.front().id;
+    workspace=aa::loadWorkspace(workspacePath,settingsPath,legacyStacks);
+    showOverlayInCapture=showOverlayInCapture||workspace.shareOverlayInCapture;
+    if(!workspace.statuses.empty())selectedStatusId=workspace.statuses.front().id;
 }
 void App::commit(aa::Workspace changed){aa::saveWorkspace(workspacePath,changed);workspace=std::move(changed);}
 aa::HudLayout* App::hud(){for(auto& h:workspace.huds)if(h.id==workspace.activeHudId)return &h;return nullptr;}

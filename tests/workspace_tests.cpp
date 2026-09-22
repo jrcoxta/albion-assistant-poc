@@ -98,6 +98,7 @@ void roundtripAndIsolation() {
     TemporaryDirectory directory;
     const auto file = directory.path / L"workspace.ini";
     auto w = populated(directory.path);
+    w.shareOverlayInCapture = true;
     aa::saveWorkspace(file, w);
     const auto content = bytes(file);
     check(content.size() > 2 && static_cast<unsigned char>(content[0]) == 0xFF &&
@@ -105,6 +106,7 @@ void roundtripAndIsolation() {
     auto loaded = aa::loadWorkspace(file, directory.path / L"settings.ini");
     check(loaded.huds.size() == 2 && loaded.statuses.size() == 2 && loaded.sets.size() == 2,
           "roundtrip preserva todas colecoes");
+    check(loaded.shareOverlayInCapture, "preferencia de compartilhamento do overlay nao foi preservada");
     check(loaded.huds[0].name == L"HUD ação 漢字 🗡" && loaded.sets[0].name == L"Set \"ação\"" &&
           loaded.statuses[1].name == L"Veneno 🧪", "roundtrip Unicode e aspas sem truncamento");
     check(loaded.huds[1].areas[0].region.x == 111 && loaded.huds[1].clientWidth == 3440 &&

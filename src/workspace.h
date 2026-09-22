@@ -37,6 +37,7 @@ struct SetProfile { std::wstring id, name; std::vector<StatusRule> rules; };
 struct Workspace {
     unsigned nextId = 1;
     int validityMs = 750;
+    bool shareOverlayInCapture = false;
     std::wstring activeHudId, activeSetId;
     std::vector<HudLayout> huds;
     std::vector<StatusDefinition> statuses;

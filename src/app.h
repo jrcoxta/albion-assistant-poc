@@ -25,7 +25,7 @@ enum Id {
     SampleValue, CaptureStack, StackList, DeleteStack, AddPreset,
     SetList, SetName, NewSet, DeleteSet, RuleList, RuleName, NewRule, DeleteRule,
     RuleStatus, SourceArea, TargetArea, ConditionBox, Stacks, EffectBox, Color, Enabled,
-    MoveRuleUp, MoveRuleDown, Validity, SampleColor, FollowClock, CaptureClock, ClockHint, Tab0=250
+    MoveRuleUp, MoveRuleDown, Validity, SampleColor, FollowClock, CaptureClock, ClockHint, ShareOverlay, Tab0=250
 };
 std::wstring widen(const std::string& value);
 std::wstring text(HWND window);
