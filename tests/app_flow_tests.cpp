@@ -32,15 +32,8 @@ LRESULT CALLBACK testProc(HWND window,UINT message,WPARAM wp,LPARAM lp){
 void tab(App& app,int page){const int physical[]={3,0,1,2};app.command(Tab0+physical[page],BN_CLICKED);require(app.page==physical[page],"navegação não mudou de página");}
 void choose(App& app,int id,int index,bool list=false){SendMessageW(app.item(id),list?LB_SETCURSEL:CB_SETCURSEL,index,0);app.command(id,list?LBN_SELCHANGE:CBN_SELCHANGE);}
 bool shows(App& app,const wchar_t* phrase){return std::any_of(app.controls.begin(),app.controls.end(),[&](HWND control){return text(control).find(phrase)!=std::wstring::npos;});}
+bool sameTop(HWND first,HWND second){RECT a{},b{};return first&&second&&GetWindowRect(first,&a)&&GetWindowRect(second,&b)&&a.top==b.top;}
 void createNamed(App& app,int command,const wchar_t* name,bool cancel=false,bool invalid=false){
-    const bool inlineName=(command==NewHud&&app.workspace.huds.empty())||(command==NewArea&&app.hud()&&app.hud()->areas.empty())||
-        (command==NewStatus&&app.workspace.statuses.empty())||(command==NewSet&&app.workspace.sets.empty())||(command==NewRule&&app.set()&&app.set()->rules.empty());
-    if(auto field=inlineName?app.item(720):nullptr){
-        SetWindowTextW(field,name);
-        if(cancel)return;
-        if(invalid){bool rejected=false;try{app.command(command,BN_CLICKED);}catch(const std::exception&){rejected=true;}require(rejected,"nome inválido aceito");return;}
-        app.command(command,BN_CLICKED);return;
-    }
     const DWORD ownerThread=GetCurrentThreadId();std::atomic<bool> answered=false;
     std::thread responder([&]{
         const auto deadline=GetTickCount64()+2000;
@@ -51,18 +44,12 @@ void createNamed(App& app,int command,const wchar_t* name,bool cancel=false,bool
                 if(GetWindow(dialog,GW_OWNER)!=c.owner||!GetDlgItem(dialog,710))return TRUE;
                 SetDlgItemTextW(dialog,710,c.name);
                 SendMessageW(dialog,WM_COMMAND,c.cancel?IDCANCEL:IDOK,0);
-                if(c.invalid&&IsWindow(dialog))SendMessageW(dialog,WM_COMMAND,IDCANCEL,0);
-                c.handled=true;return FALSE;
+                if(c.invalid&&IsWindow(dialog))SendMessageW(dialog,WM_COMMAND,IDCANCEL,0);c.handled=true;return FALSE;
             },reinterpret_cast<LPARAM>(&context));
             if(context.handled){answered=true;break;}Sleep(10);
         }
     });
-    try{
-        if(command==NewHud&&app.page==0&&app.item(HudList)){
-            SendMessageW(app.item(HudList),CB_SETCURSEL,app.workspace.huds.size(),0);
-            app.command(HudList,CBN_SELCHANGE);
-        }else app.command(command,BN_CLICKED);
-    }catch(...){responder.join();throw;}
+    try{app.command(command,BN_CLICKED);}catch(...){responder.join();throw;}
     responder.join();require(answered,"cadastro deve pedir nome antes de criar");
 }
 void confirmDeleteHud(App& app,int answer){
@@ -123,35 +110,37 @@ int wmain(int argc,wchar_t** argv){
         app.window=CreateWindowExW(0,cls.lpszClassName,L"Validação do painel",WS_OVERLAPPED|WS_CAPTION,20,20,880,740,nullptr,nullptr,app.instance,&app);
         app.target=CreateWindowExW(0,L"STATIC",L"Alvo do teste",WS_POPUP,0,0,800,600,nullptr,nullptr,app.instance,nullptr);
         require(app.window&&app.target,"janelas de teste não criadas");app.makeUI();
-        require(app.item(HudList)!=nullptr&&text(app.item(HudName))==L"Renomear HUD"&&app.item(DeleteHud)&&!app.item(NewHud)&&!app.item(Start),"HUD existente deve ter seletor e ações diretas");
+        require(app.item(HudList)!=nullptr&&text(app.item(HudName))==L"Renomear"&&app.item(NewHud)&&app.item(DeleteHud)&&!app.item(Start),"HUD existente deve ter seletor e ações diretas");
+        require(sameTop(app.item(NewHud),app.item(HudName))&&sameTop(app.item(HudName),app.item(DeleteHud)),"ações da HUD devem ficar na mesma linha");
         require(!IsWindowVisible(app.window)&&!app.rebuilding,"construção mostrou janela originalmente oculta ou deixou bloqueio ativo");
         {
             app.commit({});app.makeUI();
             require(app.item(NewHud)&&!app.item(HudName)&&!app.item(AreaList),"primeiro uso deve mostrar somente orientação e criação da HUD");
-            require(app.item(720)!=nullptr,"primeira HUD precisa aceitar nome antes de criar");
-            SetWindowTextW(app.item(720),L"Nome em edição");app.rebuildUIWithDraft();
-            require(text(app.item(720))==L"Nome em edição","reconstrução apagou nome do novo cadastro");
+            require(app.item(720)==nullptr,"primeira HUD deve pedir o nome em uma única janela de criação");
             createNamed(app,NewHud,L"Minha tela");
             require(app.hud()&&app.hud()->name==L"Minha tela"&&app.item(NewArea)&&!app.item(AreaName),"HUD sem áreas deve oferecer criação sem editor vazio");
             createNamed(app,NewArea,L"E");
-            require(app.area()&&app.area()->name==L"E"&&app.item(SelectArea)&&!app.item(Save),"área deve ser editável e salva automaticamente");
+            require(app.area()&&app.area()->name==L"E"&&app.item(SelectArea)&&!app.item(AreaName)&&!app.item(Save),"área deve usar a lista como nome e salvar automaticamente");
             require(aa::loadWorkspace(app.workspacePath,{}).huds.front().areas.front().name==L"E","criação direta não persistiu a área");
             tab(app,2);
             require(app.item(NewStatus)&&!app.item(StatusName)&&!app.item(CaptureStatus),"biblioteca vazia não deve exibir editor desabilitado");
             createNamed(app,NewStatus,L"Meu status");
-            require(app.item(CaptureStatus)&&!app.item(Save),"status deve permitir captura com edição automática");
+            require(app.item(CaptureStatus)&&!app.item(StatusName)&&!app.item(Save),"status deve usar a lista como nome e permitir captura");
             tab(app,3);
             require(app.item(NewSet)&&!app.item(RuleName),"perfis vazios não devem exibir editor de regra");
             createNamed(app,NewSet,L"Meu perfil");
             require(app.item(NewRule)&&!app.item(RuleName),"perfil vazio deve orientar criação da primeira regra");
             createNamed(app,NewRule,L"Meu destaque");
-            require(app.item(RuleName)&&!app.item(Save),"regra deve abrir para edição automática");
+            require(!app.item(RuleName)&&app.item(RenameRule)&&!app.item(Save),"regra deve usar a lista como nome e ações explícitas");
             app.commit(w);app.selectedArea=-1;app.selectedRule=-1;app.selectedStatusId=L"s1";app.page=0;app.makeUI();
         }
         {
             tab(app,0);const auto start=app.item(Start);const auto source=app.source;
             app.running=true;choose(app,HudList,0);choose(app,SetList,0);
             require(app.item(Start)==start&&app.running&&app.source==source,"seleção já ativa reconstruiu painel ou interrompeu leitura");
+            choose(app,HudList,1);
+            require(!app.running&&app.workspace.activeHudId==L"h2","trocar HUD durante leitura deve encerrar o plano anterior");
+            choose(app,HudList,0);
             app.running=false;
             ShowWindow(app.window,SW_SHOWNOACTIVATE);
             SetActiveWindow(app.window);
@@ -193,33 +182,24 @@ int wmain(int argc,wchar_t** argv){
             require(app.workspace.huds.size()==3&&app.workspace.activeHudId==selected,"nome inválido ou repetido criou HUD");
             createNamed(app,NewArea,L"Buffs criados uma vez");
             require(app.hud()->areas.size()==1&&app.area()->name==L"Buffs criados uma vez","criação da área perdeu nome/seleção");
-            SetWindowTextW(app.item(AreaName),L"Área em edição");createNamed(app,NewArea,L"Cancelada",true);
-            require(app.area()->name==L"Buffs criados uma vez"&&text(app.item(AreaName))==L"Área em edição","cancelar perdeu ou gravou rascunho da área");
-            SetWindowTextW(app.item(AreaName),L"Buffs criados uma vez");createNamed(app,NewArea,L"buffs criados uma vez",false,true);
+            createNamed(app,NewArea,L"Cancelada",true);createNamed(app,NewArea,L"buffs criados uma vez",false,true);
             require(app.hud()->areas.size()==1&&app.area()->name==L"Buffs criados uma vez","cancelar/rejeitar área alterou a seleção");
             tab(app,2);createNamed(app,NewStatus,L"Status criado uma vez");
             require(app.workspace.statuses.size()==3&&app.selectedStatus()->name==L"Status criado uma vez"&&!app.selectedStatus()->builtinAssassin&&app.selectedStatus()->stacks.empty(),
                     "criação do status perdeu nome ou herdou preset");
-            SetWindowTextW(app.item(StatusName),L"Status em edição");createNamed(app,NewStatus,L"Cancelado",true);
-            require(app.selectedStatus()->name==L"Status criado uma vez"&&text(app.item(StatusName))==L"Status em edição","cancelar perdeu ou gravou rascunho do status");
-            SetWindowTextW(app.item(StatusName),L"Status criado uma vez");createNamed(app,NewStatus,L"status criado uma vez",false,true);
+            createNamed(app,NewStatus,L"Cancelado",true);createNamed(app,NewStatus,L"status criado uma vez",false,true);
             require(app.workspace.statuses.size()==3&&app.selectedStatus()->name==L"Status criado uma vez","cancelar/rejeitar status alterou a seleção");
             tab(app,3);createNamed(app,NewSet,L"Set criado uma vez");
-            SetWindowTextW(app.item(SetName),L"Set em edição");createNamed(app,NewSet,L"Cancelado",true);
-            require(app.set()->name==L"Set criado uma vez"&&text(app.item(SetName))==L"Set em edição","cancelar perdeu ou gravou rascunho do set");
-            SetWindowTextW(app.item(SetName),L"Set criado uma vez");createNamed(app,NewSet,L"set criado uma vez",false,true);
+            createNamed(app,NewSet,L"Cancelado",true);createNamed(app,NewSet,L"set criado uma vez",false,true);
             require(app.workspace.sets.size()==3&&app.set()->name==L"Set criado uma vez","cancelar/rejeitar set alterou a seleção");
             createNamed(app,NewRule,L"Regra criada uma vez");
             require(app.workspace.sets.size()==3&&app.set()->rules.size()==1&&app.rule()->condition.name==L"Regra criada uma vez",
                     "criação de set/regra exige outro Novo");
             createNamed(app,NewRule,L"REGRA CRIADA UMA VEZ",false,true);
-            SetWindowTextW(app.item(RuleName),L"Regra em edição");createNamed(app,NewRule,L"Cancelada",true);
-            require(app.rule()->condition.name==L"Regra criada uma vez"&&text(app.item(RuleName))==L"Regra em edição","cancelar perdeu ou gravou rascunho da regra");
+            createNamed(app,NewRule,L"Cancelada",true);
+            require(app.rule()->condition.name==L"Regra criada uma vez"&&app.item(RenameRule)&&!app.item(RuleName),
+                    "regra deve ter nome somente informativo e acao explicita para renomear");
             require(app.set()->rules.size()==1,"criação aceitou regra duplicada");
-            SetWindowTextW(app.item(RuleName),L"Regra editada");app.command(Save,BN_CLICKED);
-            wchar_t savedRule[256]{};SendMessageW(app.item(RuleList),LB_GETTEXT,0,reinterpret_cast<LPARAM>(savedRule));
-            require(std::wstring(savedRule)==L"Regra editada"&&aa::loadWorkspace(app.workspacePath,{}).sets.back().rules.front().condition.name==L"Regra editada",
-                    "Salvar não refletiu edição na lista e no arquivo");
             app.commit(original);app.selectedStatusId=L"s1";app.selectedArea=-1;app.selectedRule=-1;app.page=3;app.makeUI();
         }
         choose(app,HudList,1);require(app.workspace.activeHudId==L"h2"&&app.workspace.activeSetId==L"set1"&&app.set()->rules[0].condition.stacks==3,"troca de HUD alterou o set");
@@ -299,12 +279,15 @@ int wmain(int argc,wchar_t** argv){
         screenshot(app,pictures,L"ui-monitor-screen-mismatch.png");
         app.hud()->clientWidth=800;
 
-        tab(app,1);require(app.item(HudName)&&text(app.item(HudName))==L"Renomear HUD"&&!app.item(NewHud)&&app.item(DeleteHud)&&!shows(app,L"Opções da HUD")&&app.item(AreaName)&&!app.item(RuleName)&&!app.item(CaptureStatus),"HUD deve expor renomear e excluir diretamente");
+        tab(app,1);require(app.item(HudName)&&text(app.item(HudName))==L"Renomear"&&app.item(NewHud)&&app.item(DeleteHud)&&!shows(app,L"Opções da HUD")&&!app.item(AreaName)&&!app.item(RuleName)&&!app.item(CaptureStatus),"HUD deve expor renomear e excluir diretamente");
+        require(app.item(RenameArea)&&!app.item(AreaName),"área deve usar a lista como nome e renomear por ação explícita");
+        tab(app,2);require(app.item(RenameStatus)&&!app.item(StatusName),"status deve usar a lista como nome e renomear por ação explícita");
+        tab(app,3);require(app.item(RenameSet)&&!app.item(SetName)&&app.item(NewSet)&&app.item(DeleteSet),"perfil deve usar o seletor como nome e ações explícitas");
+        tab(app,1);
         {
             const auto original=app.workspace;
             app.hud()->areas.push_back({L"Q",{380,400,64,64},48,false});
             choose(app,AreaList,1,true);
-            require(!app.item(CalibrateArea)&&shows(app,L"Não precisa medir ícone"),"destino E pede medição de ícone");
             require(aa::readinessIssues(app.workspace).empty(),"destino não medido bloqueia a regra");
             screenshot(app,pictures,L"ui-hud-destino.png");
             app.area()->region.shape=aa::RegionShape::Circle;app.makeUI();
@@ -345,12 +328,27 @@ int wmain(int argc,wchar_t** argv){
         createNamed(app,HudName,L"Cancelado",true);require(app.hud()->name==L"Ultrawide","cancelar renomeação alterou HUD");
         createNamed(app,HudName,L"   ",false,true);require(app.hud()->name==L"Ultrawide","nome vazio alterou HUD");
         tab(app,2);
-        require(app.item(StatusName)&&!app.item(StatusKind)&&!app.item(AddPreset)&&!app.item(CaptureStack)&&!app.item(HudName)&&!app.item(RuleName),"Status exibe opcoes que pertencem a regra");
-        SetWindowTextW(app.item(StatusName),L"");app.rebuildUIWithDraft();require(text(app.item(StatusName)).empty()&&app.selectedStatus()->name==L"Espírito Assassino","DPI perdeu rascunho ou gravou texto inválido");
-        SetWindowTextW(app.item(StatusName),L"Carga da adaga");tab(app,3);require(app.workspace.statuses[0].name==L"Carga da adaga"&&app.rule()->statusId==L"s1","renomear status quebrou vínculo");
-        require(app.item(RuleName)&&!app.item(StatusName)&&!app.item(HudName),"Regras misturam outros editores");
-        require(SendMessageW(app.item(ConditionBox),CB_GETCURSEL,0,0)==2&&text(app.item(Stacks))==L"3","condição ou stack incorreto na edição");
-        require(app.item(CaptureRuleStack),"regra de stacks nao oferece captura da propria amostra");
+        require(!app.item(StatusName)&&!app.item(StatusKind)&&!app.item(AddPreset)&&!app.item(CaptureStack)&&!app.item(HudName)&&!app.item(RuleName),"Status repete nome ou exibe opções da regra");
+        app.rebuildUIWithDraft();require(!app.item(StatusName)&&app.selectedStatus()->name==L"Espírito Assassino","reconstrução deve preservar o status selecionado sem repetir o nome");
+        tab(app,3);require(app.workspace.statuses[0].name==L"Espírito Assassino"&&app.rule()->statusId==L"s1","status informativo quebrou vínculo");
+        require(!app.item(RuleName)&&app.item(RenameRule)&&!app.item(StatusName)&&!app.item(HudName),"Regras repetem o nome ou misturam outros editores");
+        require(app.item(TriggerList)&&app.item(NewTrigger)&&app.item(DeleteTrigger),"regra deve expor condições alternativas por OU");
+        auto healthReady=app.workspace;healthReady.huds[0].areas[0].healthCalibration={10,4,180,5,190,42,28};app.commit(healthReady);app.makeUI();
+        app.command(NewTrigger,BN_CLICKED);require(app.rule()->triggers.size()==2&&app.selectedTrigger==1,"adicionar condição alternativa não selecionou a nova condição");
+        choose(app,TriggerKindBox,1);
+        require(app.item(HealthArea)&&app.item(HealthComparisonBox)&&app.item(HealthPercent)&&!app.item(RuleStatus),"gatilho de vida misturou controles de status");
+        choose(app,HealthArea,0);choose(app,HealthComparisonBox,0);SetWindowTextW(app.item(HealthPercent),L"49");app.saveEditor();
+        const auto& healthTrigger=app.rule()->triggers[1];
+        require(healthTrigger.kind==aa::TriggerKind::Health&&healthTrigger.healthArea==L"Meus status"&&healthTrigger.healthPercent==49,
+                "editor nao salvou a condicao de vida");
+        screenshot(app,pictures,L"ui-regra-vida.png");
+        choose(app,TriggerList,0);require(app.selectedTrigger==0,"seletor não abriu a condição escolhida");
+        choose(app,TriggerList,1);
+        app.command(DeleteTrigger,BN_CLICKED);require(app.rule()->triggers.size()==1&&app.selectedTrigger==0,"remover condição alternativa afetou a regra errada");
+        const auto& visibleTrigger=app.rule()->triggers.empty()?aa::RuleTrigger{}:app.rule()->triggers.front();
+        require(SendMessageW(app.item(ConditionBox),CB_GETCURSEL,0,0)==(visibleTrigger.condition.condition==aa::Condition::StacksEqual?2:visibleTrigger.condition.condition==aa::Condition::Absent?1:0),"condição exibida não corresponde à condição selecionada");
+        if(visibleTrigger.condition.condition==aa::Condition::StacksEqual)require(text(app.item(Stacks))==std::to_wstring(visibleTrigger.condition.stacks),"stacks exibidos não correspondem à condição selecionada");
+        if(visibleTrigger.condition.condition==aa::Condition::StacksEqual)require(app.item(CaptureRuleStack),"regra de stacks nao oferece captura da propria amostra");
         screenshot(app,pictures,L"ui-regras.png");
         require(SendMessageW(app.item(EffectBox),CB_GETCOUNT,0,0)==4&&app.item(SampleColor),"efeitos e captura de cor ausentes");
         require(app.item(FollowClock)&&SendMessageW(app.item(FollowClock),BM_GETCHECK,0,0)==BST_UNCHECKED,"opcao de acompanhar relogio ausente ou ligada no legado");
@@ -408,8 +406,9 @@ int wmain(int argc,wchar_t** argv){
             require(failed&&!app.selecting&&app.rule()->condition.color==capturedColor,"tela incompatível capturou ou perdeu cor anterior");
             app.commit(before);app.makeUI();
         }
+        const auto stacksBeforeChangingStatus=app.rule()->condition.stacks;
         choose(app,RuleStatus,1);require(SendMessageW(app.item(Stacks),CB_GETCOUNT,0,0)==0,"status personalizado herdou contadores do exemplo");
-        tab(app,2);require(app.set()->rules[0].statusId==L"s2"&&app.set()->rules[0].condition.stacks==3,"rascunho sem amostra impediu navegação ou mudou valor");
+        tab(app,2);require(app.set()->rules[0].statusId==L"s2"&&app.set()->rules[0].condition.stacks==stacksBeforeChangingStatus,"rascunho sem amostra impediu navegação ou mudou valor");
         require(!aa::readinessIssues(app.workspace).empty(),"regra sem referência ficou pronta");
         choose(app,StatusList,1,true);
         bool blocked=false;try{app.command(DeleteStatus,BN_CLICKED);}catch(const std::invalid_argument&){blocked=true;}require(blocked&&app.workspace.statuses.size()==2,"exclusão removeu status usado");

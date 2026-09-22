@@ -25,7 +25,7 @@ enum Id {
     SampleValue, CaptureStack, StackList, DeleteStack, AddPreset,
     SetList, SetName, NewSet, DeleteSet, RuleList, RuleName, NewRule, DeleteRule,
     RuleStatus, SourceArea, TargetArea, ConditionBox, Stacks, EffectBox, Color, Enabled,
-    MoveRuleUp, MoveRuleDown, Validity, SampleColor, FollowClock, CaptureClock, ClockHint, ShareOverlay, CaptureRuleStack, DeleteRuleStack, Tab0=250
+    MoveRuleUp, MoveRuleDown, RenameRule, RenameArea, RenameStatus, RenameSet, TriggerList, NewTrigger, DeleteTrigger, Validity, SampleColor, FollowClock, CaptureClock, ClockHint, ShareOverlay, CaptureRuleStack, DeleteRuleStack, CalibrateHealth, TriggerKindBox, HealthArea, HealthComparisonBox, HealthPercent, Tab0=250
 };
 std::wstring widen(const std::string& value);
 std::wstring text(HWND window);
@@ -42,7 +42,7 @@ struct App {
     HFONT font{}, titleFont{};
     std::filesystem::path directory, settingsPath, workspacePath;
     aa::Workspace workspace;
-    int page=0, selectedArea=-1, selectedRule=-1;
+    int page=0, selectedArea=-1, selectedRule=-1, selectedTrigger=0;
     std::wstring selectedStatusId;
     double dpi=1;
     bool rebuilding=false, selecting=false, running=false;
@@ -105,6 +105,7 @@ struct App {
     void updateHighlight();
     void testAction();
     void sampleActionColor(const std::function<aa::Image(HWND,RECT)>& captureFrame={});
+    void calibrateHealth();
     bool applyActionColor(const aa::Image& image);
     void applyClockReference(const aa::Image& image);
     std::optional<PickedImage> pick(aa::SelectionKind kind, const aa::Recognizer* reference=nullptr,

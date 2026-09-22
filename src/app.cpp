@@ -153,7 +153,7 @@ void App::start(){
     }
     plan=aa::makeMonitorPlan(workspace);
     if(static_cast<std::int64_t>(plan.captureArea.width)*plan.captureArea.height>64000000)throw std::runtime_error("As regiões abrangem uma área grande demais. Use o jogo em um único monitor.");
-    for(const auto& read:plan.readers)recognizers.push_back(makeRecognizer(read));
+    for(const auto& read:plan.readers)recognizers.push_back(read.kind==aa::MonitorReaderKind::Status?makeRecognizer(read):nullptr);
     for(const auto& action:plan.actions){
         if(showOverlayInCapture){
             const auto padding=aa::overlayEffectPadding(action.rule.effect,action.target.width,action.target.height,action.target.shape);
@@ -161,7 +161,7 @@ void App::start(){
             for(const auto& reader:plan.readers){RECT overlap{},origin=rect(reader.area.region);if(IntersectRect(&overlap,&destination,&origin))throw std::runtime_error("No diagnóstico visual, a ação precisa ficar fora das regiões observadas.");}
         }
         auto overlay=std::make_unique<Overlay>();overlay->setCaptureVisible(showOverlayInCapture);overlay->initialize(instance);
-        overlay->setColor(action.rule.condition.color);overlay->setEffect(action.rule.effect);overlay->setShape(action.target.shape);overlays.push_back(std::move(overlay));
+        overlay->setColor(action.rule.triggers.empty()?action.rule.condition.color:action.rule.action.color);overlay->setEffect(action.rule.effect);overlay->setShape(action.target.shape);overlays.push_back(std::move(overlay));
     }
     current.resize(plan.readers.size());lit.assign(plan.actions.size(),false);running=true;const auto runSource=++source;
     error.clear();page=3;makeUI();SetForegroundWindow(target);
@@ -172,7 +172,9 @@ void App::start(){
                 batch[i].source=runSource;batch[i].capturedMs=frame.capturedMs;
                 if(!frame.available)continue;
                 try{auto roi=plan.readers[i].area.region;roi.x-=plan.captureArea.x;roi.y-=plan.captureArea.y;
-                    batch[i].detection=recognizers[i]->recognizeNearSize(aa::cropImage(frame.image,roi),plan.readers[i].area.iconSize,roi.shape);
+                    const auto image=aa::cropImage(frame.image,roi);
+                    if(plan.readers[i].kind==aa::MonitorReaderKind::Health)batch[i].healthFraction=aa::readHealthFraction(image,plan.readers[i].area.healthCalibration);
+                    else batch[i].detection=recognizers[i]->recognizeNearSize(image,plan.readers[i].area.iconSize,roi.shape);
                 }catch(const std::exception& e){failure=widen(e.what());}
             }
             {std::lock_guard lock(mutex);latest=std::move(batch);latestSource=runSource;latestImage=std::move(frame.image);latestError=std::move(failure);}
@@ -233,7 +235,7 @@ void App::testAction(){
     previewTarget=destination->region;
     previewClock=action->followClock&&action->condition.condition!=aa::Condition::Absent;
     if(!testOverlay){testOverlay=std::make_unique<Overlay>();testOverlay->setCaptureVisible(showOverlayInCapture);testOverlay->initialize(instance);}
-    testOverlay->setColor(action->condition.color);testOverlay->setEffect(action->effect);testOverlay->setShape(previewTarget.shape);
+    testOverlay->setColor(action->triggers.empty()?action->condition.color:action->action.color);testOverlay->setEffect(action->effect);testOverlay->setShape(previewTarget.shape);
     if(!badge){badge=CreateWindowExW(WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_NOACTIVATE|WS_EX_TOPMOST|WS_EX_TOOLWINDOW,L"STATIC",L"TESTE DA AÇÃO",WS_POPUP|SS_CENTER|SS_CENTERIMAGE,0,0,1,1,nullptr,nullptr,instance,nullptr);
         if(!badge)throw std::runtime_error("Não foi possível mostrar o aviso de teste.");
         theme::styleControl(badge,theme::Role::Badge);SetLayeredWindowAttributes(badge,0,245,LWA_ALPHA);}
@@ -244,8 +246,9 @@ bool App::applyActionColor(const aa::Image& image){
     const auto color=aa::skillAccentColor(image);
     if(!color){error=L"Não encontrei uma cor nítida. A cor atual foi mantida.";return false;}
     auto changed=workspace;
-    for(auto& profile:changed.sets)if(profile.id==workspace.activeSetId)
-        profile.rules.at(static_cast<std::size_t>(selectedRule)).condition.color=*color;
+    for(auto& profile:changed.sets)if(profile.id==workspace.activeSetId) {
+        auto& selected=profile.rules.at(static_cast<std::size_t>(selectedRule));selected.action.color=*color;selected.condition.color=*color;
+    }
     commit(std::move(changed));error=L"Cor capturada e salva. Capture novamente para atualizar.";return true;
 }
 void App::applyClockReference(const aa::Image& image){
@@ -276,6 +279,28 @@ void App::sampleActionColor(const std::function<aa::Image(HWND,RECT)>& captureFr
             throw std::runtime_error("A tela ou a janela ativa mudou durante a captura. A cor anterior foi mantida.");
     }
     (void)applyActionColor(image);makeUI();
+}
+void App::calibrateHealth(){
+    if(selecting)return;
+    saveEditor();stop();
+    if((!target||!IsWindow(target))&&!connect())return;
+    const auto* selected=area();const auto* layout=hud();
+    if(!selected||!layout||!selected->region.valid()||selected->region.shape!=aa::RegionShape::Rectangle)
+        throw std::runtime_error("Selecione uma área retangular que contenha a barra de vida antes de calibrar.");
+    if(!geometryMatches())throw std::runtime_error("Escolha uma HUD compatível com a tela atual antes de calibrar a vida.");
+    aa::Image image;
+    {
+        CapturePanelGuard restore(*this);
+        image=captureOnce(target,rect(selected->region));
+        if(!geometryMatches()||GetForegroundWindow()!=target)
+            throw std::runtime_error("A tela ou a janela ativa mudou durante a captura. A calibração anterior foi mantida.");
+    }
+    const auto calibration=aa::calibrateHealth(image);
+    if(!calibration.valid())throw std::runtime_error("Não encontrei uma barra vermelha cheia. Deixe a vida em 100% e selecione uma área que contenha somente a barra.");
+    auto changed=workspace;const auto saved=std::find_if(changed.huds.begin(),changed.huds.end(),[&](const auto& value){return value.id==changed.activeHudId;});
+    if(saved==changed.huds.end()||selectedArea<0||selectedArea>=static_cast<int>(saved->areas.size()))throw std::runtime_error("Área da HUD indisponível.");
+    saved->areas[static_cast<std::size_t>(selectedArea)].healthCalibration=calibration;
+    commit(std::move(changed));error=L"Vida cheia calibrada. A condição passará a ler o percentual desta área.";
 }
 std::optional<PickedImage> App::pick(aa::SelectionKind kind,const aa::Recognizer* reference,aa::RegionShape shape){
     if(selecting)return std::nullopt;stop();if((!target||!IsWindow(target))&&!connect())return std::nullopt;
