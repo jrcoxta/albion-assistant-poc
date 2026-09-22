@@ -321,6 +321,14 @@ O Windows permaneceu bloqueado durante as alterações anteriores de interface e
 
 Para conferir: siga o roteiro do [README](../README.md), começando pelo set importado. Depois cadastre outro status, use duas regras simultâneas e verifique os destaques. Crie uma HUD para o monitor de 34 polegadas com os mesmos nomes de áreas e reutilize o set; voltar ao notebook deve restaurar suas posições. A demonstração de cinco segundos verifica a ação; o ciclo real sem número → 2 → 3 → ausente verifica a regra.
 
+## Relógio após recaptura do Espírito Assassino — 22/09/2026
+
+O Monitor reconhecia 3 stacks e mantinha `E-ABERTO` ativo, mas mostrava “relógio indisponível” e o aro sumia. A recaptura da imagem do status apagava a referência temporal explícita; como a referência personalizada deixava de usar o preset, o relógio não era carregado. Agora a recaptura conserva a referência temporal já cadastrada. Quando ela não existe, uma imagem personalizada reconhecida como Espírito Assassino pode usar o relógio embutido; imagens de outros status não recebem esse preset. Uma referência temporal explícita inválida continua indisponível, sem inventar tempo.
+
+- **APROVADO — regressão:** o novo caso em `app_flow` falhou antes da correção e passou depois. Cobre referência personalizada do Assassino, fração do relógio em captura real, status diferente e referência explícita inválida. O Debug direcionado passou; o Release canônico passou **16/16** testes.
+- **APROVADO — revisão independente:** `/root/timer_review`, base Git `512af86`, examinou o diff, o log Release, o relatório e o EXE publicado. Produto/arquitetura e QA automatizado aprovados, sem P0–P2. SHA-256 do único `dist/AlbionAssistant.exe`: `2078EB7E0816F799A61A471BDDE040F0ADC1B3246976123DCE758D78E1932141`.
+- **PENDENTE — jogo real:** confirmar o aro sobre E enquanto os 3 stacks e o relógio do buff aparecem. Os testes de interface não comprovam esse efeito na sessão do jogador. A recaptura pela interface não foi repetida com seleção manual neste ciclo.
+
 ## Ajuste de interface: grade única e ações explícitas
 
 Em 22/09/2026, a interface foi reorganizada para reduzir campos duplicados e manter uma linguagem visual única entre HUDs, Status, Perfis/Regras e Monitorar. Criação sempre pede o nome numa janela própria; renomear e excluir são ações explícitas. Seleções e navegação não gravam campos invisíveis.

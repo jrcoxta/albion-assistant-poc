@@ -619,7 +619,7 @@ void App::command(int id,int notification) {
             dialog.lpstrFilter=L"Imagem de referência (PNG/BMP)\0*.png;*.bmp\0";dialog.lpstrFile=path;dialog.nMaxFile=32768;dialog.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST;
             if(!GetOpenFileNameW(&dialog))return;image=aa::loadImage(path);
         }
-        status->referencePath=storeImage(status->id,image);status->builtinAssassin=false;status->stacks.clear();status->clockReferencePath.clear();
+        status->referencePath=storeImage(status->id,image);status->builtinAssassin=false;status->stacks.clear();
         error=L"Referência salva. Cadastre novamente as amostras de stacks para esta imagem.";break;
     }
     case CaptureStack: {

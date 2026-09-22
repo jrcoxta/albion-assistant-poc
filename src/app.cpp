@@ -48,11 +48,12 @@ bool fits(aa::Region area,int width,int height){return area.valid()&&area.x<widt
 std::unique_ptr<aa::Recognizer> makeRecognizer(const aa::MonitorReader& reader){
     try{
     auto recognizer=std::make_unique<aa::Recognizer>();
+    aa::Image reference;
     if(!reader.status.builtinAssassin){
-        const auto image=aa::loadImage(reader.status.referencePath);
-        if(!image.valid()||image.width<24||image.height<24||image.width>256||image.height>256)
+        reference=aa::loadImage(reader.status.referencePath);
+        if(!reference.valid()||reference.width<24||reference.height<24||reference.width>256||reference.height>256)
             throw std::runtime_error("A referência deve ter entre 24 e 256 pixels. Recapture o ícone na aba Status.");
-        recognizer->setReference(image);
+        recognizer->setReference(reference);
     }
     if(reader.needsStacks){
         for(const auto& sample:reader.status.stacks)
@@ -62,7 +63,9 @@ std::unique_ptr<aa::Recognizer> makeRecognizer(const aa::MonitorReader& reader){
         // O relógio é opcional: uma referência temporal ruim não desativa presença/stacks.
         try {
             if(!reader.status.clockReferencePath.empty())recognizer->setClockReference(aa::loadImage(reader.status.clockReferencePath));
-            else if(reader.status.builtinAssassin){
+            else if(reader.status.builtinAssassin ||
+                    (reference.valid()&&reference.width==reference.height&&
+                     aa::Recognizer().recognize(reference,reference.width).presence==aa::Presence::Present)){
                 const int resource=std::abs(reader.area.iconSize-40)<std::abs(reader.area.iconSize-64)?IDR_ASSASSIN_CLOCK_40:IDR_ASSASSIN_CLOCK;
                 recognizer->setClockReference(aa::loadImageResource(resource));
             }

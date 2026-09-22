@@ -470,6 +470,14 @@ int wmain(int argc,wchar_t** argv){
             const auto liveClock=aa::loadImage(std::filesystem::path(__FILE__).parent_path()/L"fixtures"/L"recognition-clock"/L"120-77561887.png");
             require(makeRecognizer(clockReader)->recognizeNearSize(liveClock,38).remainingFraction.has_value(),
                     "monitor nao selecionou referencia temporal nativa para HUD de 38/40 px");
+            clockReader.status.builtinAssassin=false;
+            clockReader.status.referencePath=app.storeImage(L"assassin-custom",aa::loadImageResource(IDR_ASSASSIN_3_40));
+            clockReader.status.clockReferencePath.clear();
+            require(makeRecognizer(clockReader)->clockReady(),"recapturar Espirito Assassino apagou o relogio conhecido");
+            require(makeRecognizer(clockReader)->recognizeNearSize(liveClock,38).remainingFraction.has_value(),
+                    "referencia personalizada do Assassino perdeu o timer no jogo");
+            clockReader.status.referencePath=app.storeImage(L"other",aa::loadImage(std::filesystem::path(__FILE__).parent_path().parent_path()/L"assets"/L"other-food.png"));
+            require(!makeRecognizer(clockReader)->clockReady(),"status diferente herdou relogio do Assassino");
             app.makeUI();screenshot(app,pictures,L"ui-status-relogio.png");
             app.commit(before);app.makeUI();
         }
