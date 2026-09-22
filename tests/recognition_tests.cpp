@@ -381,8 +381,8 @@ int main(int argc,char** argv) {
         check(singleClassFailures==0,"Amostra unica nao pode absorver outro numero ou recorte sem contador");
         custom.setReference({});
         check(custom.recognize(three,64).presence==aa::Presence::Unknown,"Referencia invalida apaga identidade anterior");
-        // Capturas da HUD ultrawide real: medição manual de 38 px para ícone
-        // de 40 px não pode apagar os três stacks. Não são imagens reescaladas.
+        // Capturas da HUD ultrawide real: medição manual de 36 ou 38 px para
+        // ícone de 40 px não pode apagar os três stacks. Não são imagens reescaladas.
         const auto ultrawide=assets.parent_path()/"tests"/"fixtures"/"recognition-ultrawide";
         auto withClock=recognizer;
         check(withClock.setClockReference(aa::loadImage(assets/"assassin-clock.png")),"Relogio do exemplo nao carregou");
@@ -391,6 +391,9 @@ int main(int argc,char** argv) {
             const auto read=recognizer.recognizeNearSize(frame,38);
             check(read.presence==aa::Presence::Present&&read.stacks==3u,
                   "Medicao manual dois pixels menor apagou tres stacks na HUD real");
+            const auto measured36=recognizer.recognizeNearSize(frame,36);
+            check(measured36.presence==aa::Presence::Present&&measured36.stacks==3u,
+                  "Medicao manual quatro pixels menor apagou tres stacks na HUD real");
             const auto timed=withClock.recognizeNearSize(frame,38);
             check(timed.presence==read.presence&&timed.stacks==read.stacks,
                   "Relogio alterou identidade ou stacks com tolerancia de tamanho");
@@ -398,14 +401,24 @@ int main(int argc,char** argv) {
         for(const auto* name:{"absent-before.png","absent-after.png"})
             check(recognizer.recognizeNearSize(aa::loadImage(ultrawide/name),38).presence==aa::Presence::Absent,
                   "Tolerancia de tamanho inventou status ausente na HUD real");
+        check(recognizer.recognizeNearSize(aa::loadImage(ultrawide/"absent-before.png"),36).presence==aa::Presence::Absent,
+              "Tolerancia ampliada inventou buff antes de ele aparecer");
+        check(recognizer.recognizeNearSize(aa::loadImage(ultrawide/"absent-after.png"),36).presence==aa::Presence::Absent,
+              "Tolerancia ampliada inventou buff depois de ele desaparecer");
         const auto realTwo=recognizer.recognizeNearSize(aa::loadImage(ultrawide/"stacks-2.png"),38);
         // O dígito pequeno já é desconhecido na busca exata em 40 px. Ele pode
         // continuar desconhecido, mas nunca pode acionar a regra de três.
         check(realTwo.presence==aa::Presence::Present&&(!realTwo.stacks||realTwo.stacks==2u),
               "Tolerancia confundiu dois com tres stacks reais");
+        const auto realTwo36=recognizer.recognizeNearSize(aa::loadImage(ultrawide/"stacks-2.png"),36);
+        check(realTwo36.presence==aa::Presence::Present&&(!realTwo36.stacks||realTwo36.stacks==2u),
+              "Tolerancia ampliada confundiu dois com tres stacks reais");
         const auto realNoCounter=recognizer.recognizeNearSize(aa::loadImage(ultrawide/"present-no-counter.png"),38);
         check(realNoCounter.presence==aa::Presence::Present&&!realNoCounter.stacks,
               "Tolerancia inventou stacks sem numero visivel");
+        const auto realNoCounter36=recognizer.recognizeNearSize(aa::loadImage(ultrawide/"present-no-counter.png"),36);
+        check(realNoCounter36.presence==aa::Presence::Present&&!realNoCounter36.stacks,
+              "Tolerancia ampliada inventou stacks sem numero visivel");
         check(recognizer.recognizeNearSize({},38).presence==aa::Presence::Unknown,
               "Tolerancia aceitou captura invalida");
         auto ambiguous=aa::loadImage(ultrawide/"stacks-3-middle.png");

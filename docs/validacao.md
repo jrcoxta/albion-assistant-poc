@@ -1,5 +1,13 @@
 # Validação do Albion Assistant
 
+## Regressão do E com três stacks — 22/09/2026
+
+Base Git `3e373cb`. O usuário relatou que a regra **E-ABERTO** deixou de destacar o E após a entrega da condição de vida, sem alterar o status. O Monitor mostrava **Espírito Assassino: ausente** mesmo durante o teste com três stacks. A área `meu-personagem` estava medida para ícone de 36 px; capturas reais da HUD mostram o ícone em aproximadamente 40 px. A busca anterior só tolerava dois pixels de diferença. A inclusão da leitura de vida modificou o ciclo/área de captura, mas não há evidência suficiente para afirmar que ela alterou a escala do ícone; a causa temporal exata permanece incerta.
+
+- **APROVADO — reprodução e regressão:** uma captura real com três stacks falhou com a medida de 36 px antes da correção. A busca agora alcança até quatro pixels de diferença somente quando há indício suficiente de identidade, sem afrouxar os limiares do reconhecedor. Três capturas reais de três stacks passam; capturas de dois stacks, sem contador e de buff ausente antes/depois não acionam três stacks. O aviso de referência do relógio indisponível é independente da detecção do buff.
+- **APROVADO — revisão e entrega automatizada:** `/root/e_recognition_review` aprovou o diff a partir de `3e373cb`, sem achados P0–P2. Build canônico Release passou 16/16 testes, incluindo `recognition` em 7,54 s; `dist` contém somente `AlbionAssistant.exe`, SHA-256 `DB713FA91E710B2EEA2CAC95F510595EFAF1EF010990B1405232311643B7E565`, igual ao relatório `build/logs/Release-validation.json`.
+- **PENDENTE — jogo real:** confirmar com três stacks no Albion e a leitura ativa que o Monitor mostra o status presente com `3` e o E acende. Se ainda mostrar ausente, registrar o quadro da HUD e a linha do Monitor para investigar outra variação visual ou a captura. O gate de confiança e o custo de busca em variações não cobertas permanecem risco residual de baixa prioridade.
+
 ## Pulso dourado e leitura de vida sem alvo — 22/09/2026
 
 Base Git `b9895c6`. O usuário confirmou que a condição de vida funciona, observou alguns destaques breves sem alvo selecionado e pediu um dourado mais vivo sobre a habilidade. Critérios: manter ícone, cor manual, aro e formas legíveis; rejeitar vermelho solto fora do início da barra; preservar leitura de vida baixa e com texto; publicar um único EXE.

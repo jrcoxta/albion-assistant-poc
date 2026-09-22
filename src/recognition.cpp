@@ -197,7 +197,8 @@ Detection Recognizer::recognizeNearSize(const Image& image,int iconSize,RegionSh
     if(result.presence==Presence::Present ||
        (result.detail!="Buff nao localizado" && result.detail!="Identidade incerta"))return result;
     std::optional<Detection> found;
-    for(int offset:{-2,-1,1,2}) {
+    for(int offset:{-1,1,-2,2,-3,3,-4,4}) {
+        if(std::abs(offset)>2 && (found ? found->stacks || stackReferences_.empty() : result.confidence<.70f))break;
         const int size=iconSize+offset;
         if(size<24||size>256||size>image.width||size>image.height)continue;
         auto candidate=recognize(image,size,searchShape);
