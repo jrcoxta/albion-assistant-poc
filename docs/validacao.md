@@ -1,5 +1,13 @@
 # Validação do Albion Assistant
 
+## Condição por porcentagem de vida — 22/09/2026
+
+Uma regra agora aceita condição de **Status** ou **Vida**. Na condição de vida, a área da HUD é calibrada com a barra cheia; o aplicativo identifica a faixa vermelha e mede seu preenchimento atual da esquerda para a direita. A leitura incerta não ativa o destaque. Limites usam histerese de 2 pontos: `≤49%` só libera acima de 51%; `≥49%` só libera abaixo de 47%.
+
+- **APROVADO — testes e publicação:** build canônico Release com 16/16 testes aprovados. Inclui 48%, 49%, 50% e vida cheia com texto sobre a barra; persistência schema 4; condição composta Status OU Vida; histerese e leitura incerta; editor que salva área, operador e percentual. Executável único publicado em `dist/AlbionAssistant.exe`, SHA-256 `C2EC05D04139942C0ABAEE9D6788C1B6AFA3AAA70B222A3821DEAD69ABF218E4`.
+- **APROVADO — evidência visual:** `build/ux-health-20260922/ui-regra-vida.png` mostra o editor compacto de Vida, sem controles de status, stacks ou relógio.
+- **PENDENTE — jogo real:** calibrar uma barra cheia no Albion e confirmar a transição próxima do limite com uma barra parcialmente vazia. A primeira versão atende barras vermelhas horizontais que esvaziam da direita para a esquerda; não usa OCR nem entrada no jogo.
+
 ## Botões diretos da HUD — 22/09/2026
 
 Base `e1e52fb`. A pedido do usuário, o menu “Opções da HUD” foi removido. Ações diretas “Renomear HUD” e “Excluir HUD” ocupam o espaço ao lado do seletor, preservando os fluxos de confirmação e renomeação existentes.
@@ -266,3 +274,11 @@ O Windows permaneceu bloqueado durante as alterações anteriores de interface e
 
 Para conferir: siga o roteiro do [README](../README.md), começando pelo set importado. Depois cadastre outro status, use duas regras simultâneas e verifique os destaques. Crie uma HUD para o monitor de 34 polegadas com os mesmos nomes de áreas e reutilize o set; voltar ao notebook deve restaurar suas posições. A demonstração de cinco segundos verifica a ação; o ciclo real sem número → 2 → 3 → ausente verifica a regra.
 
+## Ajuste de interface: grade única e ações explícitas
+
+Em 22/09/2026, a interface foi reorganizada para reduzir campos duplicados e manter uma linguagem visual única entre HUDs, Status, Perfis/Regras e Monitorar. Criação sempre pede o nome numa janela própria; renomear e excluir são ações explícitas. Seleções e navegação não gravam campos invisíveis.
+
+- **APROVADO — fluxo e persistência:** `app_flow` cobre criação por diálogo, cancelamento, nomes repetidos, renomeação explícita, seleção e a interrupção da leitura ao trocar HUD durante monitoramento.
+- **APROVADO — interface:** as ações Criar, Renomear e Excluir ficam na mesma linha nos cabeçalhos de HUD, Status e Perfil; a regra reúne Renomear e Excluir ao nome. Rótulos, mensagens de salvamento e instruções repetidas foram removidos.
+- **APROVADO — revisão independente:** produto/arquitetura apontou rótulo de validade, exclusão ambígua e desalinhamentos; foram corrigidos. QA encontrou que a troca de HUD/perfil poderia conservar o plano em execução; a correção interrompe a leitura depois de confirmar a nova seleção e possui regressão automatizada.
+- **APROVADO — build e publicação:** build canônico Release executou 15/15 testes, validou empacotamento e publicou exclusivamente `dist/AlbionAssistant.exe`. As quatro telas foram renderizadas pelo teste em `build/ux-final-2-20260922`; essa evidência é estática, sem sessão nova no jogo.

@@ -115,6 +115,8 @@ int main(){try{
         require(!aa::evaluateMonitor(healthPlan,healthReadings,1000,750,7)[0],"52 por cento manteve o limite 49 ativo");
         healthReadings[lifeIndex].healthFraction.reset();
         require(!aa::evaluateMonitor(healthPlan,healthReadings,1000,750,7)[0],"vida incerta ativou a regra");
+        healthReadings[lifeIndex].healthFraction=.50f;
+        require(!aa::evaluateMonitor(healthPlan,healthReadings,1000,750,7)[0],"vida nova sem limiar reutilizou a histerese incerta");
     }
     require(aa::evaluateMonitor(plan,obs,1000,750,7)==std::vector<bool>({true,false,false}),"prioridade de destino ou condicao incorreta");
     obs[0].detection.stacks=2;obs[1].detection.presence=aa::Presence::Present;

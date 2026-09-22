@@ -141,7 +141,7 @@ git commit -m "Integra condição de vida ao monitor"
 - Produces CalibrateHealth, que captura a área selecionada e conserva a calibração anterior se falhar.
 - Produces um editor de gatilho Status ou Vida.
 
-- [ ] **Step 1: Write the failing app-flow test**
+- [x] **Step 1: Write the failing app-flow test**
 
 ~~~
 choose(app,TriggerKindBox,1);
@@ -152,23 +152,23 @@ app.saveEditor();
 require(app.rule()->triggers[0].kind==aa::TriggerKind::Health&&app.rule()->triggers[0].healthPercent==49,"editor nao salvou vida");
 ~~~
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: ctest --test-dir build/release -R app_flow --output-on-failure
 
 Expected: FAIL because controls and command do not exist.
 
-- [ ] **Step 3: Write the minimal implementation**
+- [x] **Step 3: Write the minimal implementation**
 
 Show Calibrar vida cheia beside Medir ícone for a saved rectangular area. Capture it with the existing game-capture guard, call calibrateHealth, and show a concrete failure without replacing old data. In a Vida trigger hide status, stacks and clock; show area, operator and 1–100%.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run: ctest --test-dir build/release -R app_flow --output-on-failure
 
 Expected: PASS for saving, failed recalibration and a separate status condition remaining intact.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ~~~
 git add src/app.h src/app.cpp src/app_ui.cpp tests/app_flow_tests.cpp
@@ -181,19 +181,19 @@ git commit -m "Configura condições por vida no painel"
 
 - Modify: docs/validacao.md
 
-- [ ] **Step 1: Execute the canonical build**
+- [x] **Step 1: Execute the canonical build**
 
 Run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1
 
 Expected: all tests pass and dist/AlbionAssistant.exe is verified.
 
-- [ ] **Step 2: Capture UI evidence**
+- [x] **Step 2: Capture UI evidence**
 
 Run: build\release\app_flow_tests.exe build\ux-health-20260922
 
 Expected: a UI image shows the compact health condition without status controls.
 
-- [ ] **Step 3: Record validation and commit**
+- [x] **Step 3: Record validation and commit**
 
 Record the automated result and the real-game check: calibrate at full health and observe a depleted bar.
 

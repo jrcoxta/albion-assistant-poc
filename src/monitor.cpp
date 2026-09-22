@@ -84,7 +84,7 @@ std::vector<bool> evaluateMonitor(const MonitorPlan& plan,const std::vector<Obse
                     matches=trigger.healthComparison==HealthComparison::AtMost ? *observation.healthFraction<=(latched?threshold+.02f:threshold) :
                         *observation.healthFraction>=(latched?threshold-.02f:threshold);
                     if(k<a.healthLatches.size())a.healthLatches[k]=matches;
-                }
+                } else if(k<a.healthLatches.size())a.healthLatches[k]=false;
             } else matches=evaluate(trigger.condition,observation,nowMs,validityMs,source);
             if(matches){matching=k;break;}
         }
