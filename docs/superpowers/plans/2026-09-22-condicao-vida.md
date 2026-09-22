@@ -35,7 +35,7 @@
 - Produces HealthCalibration calibrateHealth(const Image&).
 - Produces std::optional<float> readHealthFraction(const Image&, const HealthCalibration&).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ~~~
 const auto calibration=aa::calibrateHealth(healthImage(1.0f,true));
@@ -45,13 +45,13 @@ for(const auto [input,expected]:std::array{{.48f,.48f},{.49f,.49f},{.50f,.50f}})
 require(!aa::readHealthFraction(aa::Image{},calibration),"imagem incerta produziu percentual");
 ~~~
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: cmake --build build/release --target health_reader_tests --config Release && build\release\health_reader_tests.exe
 
 Expected: FAIL because the medidor does not exist.
 
-- [ ] **Step 3: Write the minimal implementation**
+- [x] **Step 3: Write the minimal implementation**
 
 ~~~
 struct HealthCalibration { int x=0,y=0,width=0,height=0; float hue=0, minimumSaturation=0; bool valid() const; };
@@ -61,13 +61,13 @@ std::optional<float> readHealthFraction(const Image& image,const HealthCalibrati
 
 Find the widest saturated red horizontal run in the full reference. At read time inspect three saved rows, discard white and low-saturation pixels, use the median of the rightmost contiguous fill columns, and return nullopt unless two rows agree.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run: cmake --build build/release --target health_reader_tests --config Release && build\release\health_reader_tests.exe
 
 Expected: PASS for 48%, 49%, 50%, full health, text over the bar and invalid image.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ~~~
 git add CMakeLists.txt src/health_reader.h src/health_reader.cpp tests/health_reader_tests.cpp
