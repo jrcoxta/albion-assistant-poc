@@ -29,7 +29,7 @@ LRESULT CALLBACK testProc(HWND window,UINT message,WPARAM wp,LPARAM lp){
     if(message==WM_PAINT&&app){if(app->rebuilding)++intermediatePaints;app->paint();return 0;}
     return DefWindowProcW(window,message,wp,lp);
 }
-void tab(App& app,int page){app.command(Tab0+page,BN_CLICKED);require(app.page==page,"navegação não mudou de página");}
+void tab(App& app,int page){const int physical[]={3,0,1,2};app.command(Tab0+physical[page],BN_CLICKED);require(app.page==physical[page],"navegação não mudou de página");}
 void choose(App& app,int id,int index,bool list=false){SendMessageW(app.item(id),list?LB_SETCURSEL:CB_SETCURSEL,index,0);app.command(id,list?LBN_SELCHANGE:CBN_SELCHANGE);}
 bool shows(App& app,const wchar_t* phrase){return std::any_of(app.controls.begin(),app.controls.end(),[&](HWND control){return text(control).find(phrase)!=std::wstring::npos;});}
 void createNamed(App& app,int command,const wchar_t* name,bool cancel=false,bool invalid=false){
@@ -114,10 +114,11 @@ int wmain(int argc,wchar_t** argv){
         app.window=CreateWindowExW(0,cls.lpszClassName,L"Validação do painel",WS_OVERLAPPED|WS_CAPTION,20,20,880,740,nullptr,nullptr,app.instance,&app);
         app.target=CreateWindowExW(0,L"STATIC",L"Alvo do teste",WS_POPUP,0,0,800,600,nullptr,nullptr,app.instance,nullptr);
         require(app.window&&app.target,"janelas de teste não criadas");app.makeUI();
+        require(app.item(NewHud)!=nullptr&&!app.item(Start),"abertura deve começar no cadastro de HUDs, não no monitor");
         require(!IsWindowVisible(app.window)&&!app.rebuilding,"construção mostrou janela originalmente oculta ou deixou bloqueio ativo");
         {
-            const auto start=app.item(Start);const auto source=app.source;
-            app.running=true;tab(app,0);choose(app,HudList,0);choose(app,SetList,0);
+            tab(app,0);const auto start=app.item(Start);const auto source=app.source;
+            app.running=true;choose(app,HudList,0);choose(app,SetList,0);
             require(app.item(Start)==start&&app.running&&app.source==source,"seleção já ativa reconstruiu painel ou interrompeu leitura");
             app.running=false;
             ShowWindow(app.window,SW_SHOWNOACTIVATE);
@@ -191,14 +192,14 @@ int wmain(int argc,wchar_t** argv){
             wchar_t savedRule[256]{};SendMessageW(app.item(RuleList),LB_GETTEXT,0,reinterpret_cast<LPARAM>(savedRule));
             require(std::wstring(savedRule)==L"Regra editada"&&aa::loadWorkspace(app.workspacePath,{}).sets.back().rules.front().condition.name==L"Regra editada",
                     "Salvar não refletiu edição na lista e no arquivo");
-            app.commit(original);app.selectedStatusId=L"s1";app.selectedArea=-1;app.selectedRule=-1;app.page=0;app.makeUI();
+            app.commit(original);app.selectedStatusId=L"s1";app.selectedArea=-1;app.selectedRule=-1;app.page=3;app.makeUI();
         }
         choose(app,HudList,1);require(app.workspace.activeHudId==L"h2"&&app.workspace.activeSetId==L"set1"&&app.set()->rules[0].condition.stacks==3,"troca de HUD alterou o set");
         choose(app,SetList,1);require(app.workspace.activeHudId==L"h2"&&app.workspace.activeSetId==L"set2","troca de set alterou a HUD");choose(app,SetList,0);
 
         app.hud()->areas[0].iconCalibrated=false;
         tab(app,2);app.start();
-        require(app.page==0&&!app.running&&app.recognizers.empty()&&app.overlays.empty(),"origem sem calibração iniciou leitura");
+        require(app.page==3&&!app.running&&app.recognizers.empty()&&app.overlays.empty(),"origem sem calibração iniciou leitura");
         require(!app.capturePreview.valid(),"referência do status apareceu como captura após início bloqueado");
         require(app.referencePreview.valid(),"início bloqueado perdeu a referência da biblioteca");
         require(app.error.find(L"Meus status")!=std::wstring::npos&&app.error.find(L"Monitor 34")!=std::wstring::npos&&

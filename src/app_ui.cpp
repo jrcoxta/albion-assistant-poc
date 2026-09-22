@@ -229,7 +229,7 @@ void App::makeUI() {
     SendMessageW(title,WM_SETFONT,reinterpret_cast<WPARAM>(titleFont),FALSE);theme::styleControl(title,theme::Role::Title);
     control(L"STATIC",L"",SS_ENDELLIPSIS,24,53,394,26,ActiveNames);
     control(L"STATIC",L"",SS_ENDELLIPSIS,430,53,402,26,ActiveSetName);
-    const wchar_t* tabs[]={L"Monitor",L"HUDs",L"Status",L"Sets e regras"};
+    const wchar_t* tabs[]={L"HUDs",L"Status",L"Perfis e regras",L"Monitorar"};
     for(int i=0;i<4;++i){button(tabs[i],Tab0+i,24+i*206,88,194);theme::styleControl(item(Tab0+i),theme::Role::Tab);theme::setActive(item(Tab0+i),i==page);}
     auto combo=[&](int id,int x,int y,int width) {return control(L"COMBOBOX",L"",WS_TABSTOP|CBS_DROPDOWNLIST|CBS_OWNERDRAWFIXED|CBS_HASSTRINGS|WS_VSCROLL,x,y,width,240,id);};
     auto list=[&](int id,int x,int y,int width,int height) {return control(L"LISTBOX",L"",WS_TABSTOP|WS_BORDER|WS_VSCROLL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT|LBS_OWNERDRAWFIXED|LBS_HASSTRINGS,x,y,width,height,id);};
@@ -241,7 +241,7 @@ void App::makeUI() {
         auto field=combo(SetList,x,y,width);for(const auto& value:workspace.sets)add(field,value.name);
         choose(field,indexOf(workspace.sets,workspace.activeSetId));
     };
-    if(page==0) {
+    if(page==3) {
         label(L"HUD desta tela",24,136,386);hudChoices(24,158,386);
         label(L"Set de regras",430,136,402);setChoices(430,158,402);
         button(L"Conectar ao jogo",Connect,24,202,158);button(L"Iniciar leitura",Start,194,202,150);button(L"Parar",Stop,356,202,100);
@@ -251,7 +251,7 @@ void App::makeUI() {
         label(L"Leituras e destaques",24,250,808);
         control(L"EDIT",L"",WS_TABSTOP|WS_BORDER|WS_VSCROLL|ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL,24,275,808,159,MonitorSummary);
         label(L"Última captura da área monitorada",24,449,620);button(L"Salvar ajuste",Save,664,444,168);
-    } else if(page==1) {
+    } else if(page==0) {
         label(L"HUDs salvas",24,136,350);hudChoices(24,158,350);
         label(L"Nome da HUD",394,136,268);edit(hud()?hud()->name.c_str():L"",HudName,394,158,268);
         button(L"Nova HUD",NewHud,680,156,152);button(L"Excluir HUD",DeleteHud,680,198,152);
@@ -274,7 +274,7 @@ void App::makeUI() {
         for(int id:{HudName,DeleteHud,NewArea,Save})EnableWindow(item(id),hud()!=nullptr);
         for(int id:{AreaName,DeleteArea,SelectArea})EnableWindow(item(id),area()!=nullptr);
         EnableWindow(item(CalibrateArea),area()&&area()->region.valid());
-    } else if(page==2) {
+    } else if(page==1) {
         label(L"Biblioteca compartilhada",24,136,238);auto statuses=list(StatusList,24,160,238,364);
         for(const auto& value:workspace.statuses)add(statuses,value.name,true);
         if(!selectedStatus()&&!workspace.statuses.empty())selectedStatusId=workspace.statuses.front().id;
@@ -373,8 +373,8 @@ void App::rebuildUIWithDraft() {
 aa::Workspace App::editorValues() {
     if(rebuilding||controls.empty())return workspace;
     auto changed=workspace;
-    if(page==0&&item(Validity))changed.validityMs=number(Validity,1,60000);
-    if(page==1)if(auto currentHud=byId(changed.huds,changed.activeHudId)) {
+    if(page==3&&item(Validity))changed.validityMs=number(Validity,1,60000);
+    if(page==0)if(auto currentHud=byId(changed.huds,changed.activeHudId)) {
         currentHud->name=nameFrom(item(HudName));checkName(changed.huds,currentHud->id,currentHud->name);
         if(selectedArea>=0&&selectedArea<static_cast<int>(currentHud->areas.size())) {
             auto name=nameFrom(item(AreaName));
@@ -383,10 +383,10 @@ aa::Workspace App::editorValues() {
             currentHud->areas[static_cast<std::size_t>(selectedArea)].name=std::move(name);
         }
     }
-    if(page==2)if(auto status=byId(changed.statuses,selectedStatusId)) {
+    if(page==1)if(auto status=byId(changed.statuses,selectedStatusId)) {
         status->name=nameFrom(item(StatusName));checkName(changed.statuses,status->id,status->name);
     }
-    if(page==3)if(auto currentSet=byId(changed.sets,changed.activeSetId)) {
+    if(page==2)if(auto currentSet=byId(changed.sets,changed.activeSetId)) {
         currentSet->name=nameFrom(item(SetName));checkName(changed.sets,currentSet->id,currentSet->name);
         if(selectedRule>=0&&selectedRule<static_cast<int>(currentSet->rules.size())) {
             auto& value=currentSet->rules[static_cast<std::size_t>(selectedRule)];
@@ -417,7 +417,7 @@ void App::saveEditor() {
 }
 
 void App::updateRuleChoices() {
-    if(page!=3||!item(Stacks))return;
+    if(page!=2||!item(Stacks))return;
     auto stackControl=item(Stacks);const auto old=selection(stackControl);
     unsigned selected=old>=0?static_cast<unsigned>(SendMessageW(stackControl,CB_GETITEMDATA,old,0)):rule()?rule()->condition.stacks:0;
     const auto statusIndex=selection(item(RuleStatus));
@@ -488,7 +488,7 @@ void App::command(int id,int notification) {
         error=L"Seleção atualizada. As alterações anteriores foram salvas.";makeUI();return;
     }
     if(notification!=BN_CLICKED)return;
-    if(id>=Tab0&&id<Tab0+4){if(page==id-Tab0)return;saveEditor();page=id-Tab0;if(page==0)capturePreview={};error=L"Alterações salvas.";makeUI();return;}
+    if(id>=Tab0&&id<Tab0+4){if(page==id-Tab0)return;saveEditor();page=id-Tab0;if(page==3)capturePreview={};error=L"Alterações salvas.";makeUI();return;}
     if(id==Stop){stop();error=L"Leitura parada. Os destaques estão apagados.";refreshStatus();return;}
     if(id==Connect){saveEditor();connect();refreshStatus();return;}
     if(id==Start){start();refreshStatus();return;}
@@ -656,10 +656,10 @@ void App::refreshStatus() {
         else if(!error.empty())state=L"Leitura: "+error;
         else state=L"Leitura ativa. Cada status é acompanhado na área indicada abaixo.";
     }
-    else if(page==0&&error.starts_with(L"Antes de iniciar:"))state=L"Leitura não iniciada. Veja as pendências em Leituras e destaques.";
+    else if(page==3&&error.starts_with(L"Antes de iniciar:"))state=L"Leitura não iniciada. Veja as pendências em Leituras e destaques.";
     if(!hotkeyWarning.empty())state+=L"\n"+hotkeyWarning;
     setIfChanged(statusLabel,state);
-    if(page!=0)return;
+    if(page!=3)return;
     EnableWindow(item(Start),!running);EnableWindow(item(Stop),running||previewUntil!=0);
     std::wstring summary;
     if(!running) {

@@ -149,7 +149,7 @@ void App::start(){
     if(!geometryMatches())issues.insert(issues.begin(),L"A HUD não corresponde à resolução/escala atual. Escolha outra ou crie uma HUD para esta tela.");
     if(!issues.empty()){
         error=L"Antes de iniciar:\r\n";for(std::size_t i=0;i<std::min<std::size_t>(issues.size(),4);++i)error+=L"• "+issues[i]+L"\r\n";
-        page=0;makeUI();return;
+        page=3;makeUI();return;
     }
     plan=aa::makeMonitorPlan(workspace);
     if(static_cast<std::int64_t>(plan.captureArea.width)*plan.captureArea.height>64000000)throw std::runtime_error("As regiões abrangem uma área grande demais. Use o jogo em um único monitor.");
@@ -164,7 +164,7 @@ void App::start(){
         overlay->setColor(action.rule.condition.color);overlay->setEffect(action.rule.effect);overlay->setShape(action.target.shape);overlays.push_back(std::move(overlay));
     }
     current.resize(plan.readers.size());lit.assign(plan.actions.size(),false);running=true;const auto runSource=++source;
-    error.clear();page=0;makeUI();SetForegroundWindow(target);
+    error.clear();page=3;makeUI();SetForegroundWindow(target);
     try{
         capture.start(target,rect(plan.captureArea),[this,runSource](aa::CaptureFrame frame){
             std::vector<aa::Observation> batch(plan.readers.size());std::wstring failure=widen(frame.error);
@@ -186,7 +186,7 @@ void App::consume(){
     if(!current.empty()&&std::all_of(current.begin(),current.end(),[this](const auto& observation){
         return observation.source==source&&observation.capturedMs>0;
     }))lastReadings=current;
-    updateHighlight();refreshStatus();if(page==0){RECT area{px(24),px(486),px(832),px(602)};InvalidateRect(window,&area,FALSE);}
+    updateHighlight();refreshStatus();if(page==3){RECT area{px(24),px(486),px(832),px(602)};InvalidateRect(window,&area,FALSE);}
 }
 std::vector<std::optional<float>> App::evaluateReadings(std::int64_t now,bool targetReady){
     std::vector<std::optional<float>> remaining(plan.actions.size());
