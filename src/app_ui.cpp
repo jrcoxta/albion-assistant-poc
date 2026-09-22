@@ -269,8 +269,8 @@ void App::makeUI() {
             button(firstHud?L"Criar HUD":L"Criar outra HUD",NewHud,64,462,300);
             theme::styleControl(item(NewHud),theme::Role::Primary);
         } else {
-        label(L"HUD selecionada",24,136,628);hudChoices(24,158,628);
-        button(L"Opções da HUD",HudOptions,670,156,162);
+        label(L"HUD selecionada",24,136,466);hudChoices(24,158,466);
+        button(L"Renomear HUD",HudName,510,156,154);button(L"Excluir HUD",DeleteHud,678,156,154);
         auto screen=hud()&&hud()->clientWidth>0?std::to_wstring(hud()->clientWidth)+L" × "+std::to_wstring(hud()->clientHeight)+L" px · DPI "+std::to_wstring(hud()->monitorDpi):L"A tela será registrada ao selecionar a primeira área.";
         label(screen.c_str(),24,207,632,38);
         if(hud()->areas.empty()) {
@@ -514,16 +514,6 @@ void App::command(int id,int notification) {
     if(id==HudList&&notification==CBN_SELCHANGE&&page==0&&selection(item(HudList))==static_cast<int>(workspace.huds.size())){
         choose(item(HudList),indexOf(workspace.huds,workspace.activeHudId));
         command(NewHud,BN_CLICKED);return;
-    }
-    if(id==HudOptions&&notification==BN_CLICKED&&hud()){
-        const auto menu=CreatePopupMenu();
-        if(!menu)throw std::runtime_error("Não foi possível abrir as opções da HUD.");
-        AppendMenuW(menu,MF_STRING,HudName,L"Renomear HUD");
-        AppendMenuW(menu,MF_SEPARATOR,0,nullptr);
-        AppendMenuW(menu,MF_STRING,DeleteHud,L"Excluir HUD");
-        RECT anchor{};GetWindowRect(item(HudOptions),&anchor);
-        const auto action=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTALIGN,anchor.right,anchor.bottom,0,window,nullptr);
-        DestroyMenu(menu);if(action)command(static_cast<int>(action),BN_CLICKED);return;
     }
     if(id==HudName&&notification==BN_CLICKED&&hud()){
         const auto name=requestName(*this,HudName);if(!name)return;

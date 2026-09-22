@@ -123,7 +123,7 @@ int wmain(int argc,wchar_t** argv){
         app.window=CreateWindowExW(0,cls.lpszClassName,L"Validação do painel",WS_OVERLAPPED|WS_CAPTION,20,20,880,740,nullptr,nullptr,app.instance,&app);
         app.target=CreateWindowExW(0,L"STATIC",L"Alvo do teste",WS_POPUP,0,0,800,600,nullptr,nullptr,app.instance,nullptr);
         require(app.window&&app.target,"janelas de teste não criadas");app.makeUI();
-        require(app.item(HudList)!=nullptr&&!app.item(HudName)&&!app.item(NewHud)&&!app.item(Start),"HUD existente deve ter seletor sem formulário de nome/criação");
+        require(app.item(HudList)!=nullptr&&text(app.item(HudName))==L"Renomear HUD"&&app.item(DeleteHud)&&!app.item(NewHud)&&!app.item(Start),"HUD existente deve ter seletor e ações diretas");
         require(!IsWindowVisible(app.window)&&!app.rebuilding,"construção mostrou janela originalmente oculta ou deixou bloqueio ativo");
         {
             app.commit({});app.makeUI();
@@ -299,7 +299,7 @@ int wmain(int argc,wchar_t** argv){
         screenshot(app,pictures,L"ui-monitor-screen-mismatch.png");
         app.hud()->clientWidth=800;
 
-        tab(app,1);require(app.item(HudOptions)&&!app.item(HudName)&&!app.item(NewHud)&&!app.item(DeleteHud)&&app.item(AreaName)&&!app.item(RuleName)&&!app.item(CaptureStatus),"HUD mistura ações ou outros cadastros");
+        tab(app,1);require(app.item(HudName)&&text(app.item(HudName))==L"Renomear HUD"&&!app.item(NewHud)&&app.item(DeleteHud)&&!shows(app,L"Opções da HUD")&&app.item(AreaName)&&!app.item(RuleName)&&!app.item(CaptureStatus),"HUD deve expor renomear e excluir diretamente");
         {
             const auto original=app.workspace;
             app.hud()->areas.push_back({L"Q",{380,400,64,64},48,false});
