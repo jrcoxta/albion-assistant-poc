@@ -13,7 +13,7 @@ struct HealthCalibration {
     std::uint8_t green = 0;
     std::uint8_t blue = 0;
 
-    bool valid() const { return width >= 24 && height >= 3 && red > 0; }
+    bool valid() const { return width >= 24 && height >= 5 && red >= 80 && red > green + 65 && red > blue + 55; }
 };
 
 HealthCalibration calibrateHealth(const Image& image);

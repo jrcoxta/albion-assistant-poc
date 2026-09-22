@@ -352,6 +352,18 @@ int wmain(int argc,wchar_t** argv){
         require(healthTrigger.kind==aa::TriggerKind::Health&&healthTrigger.healthArea==L"Meus status"&&healthTrigger.healthPercent==49,
                 "editor nao salvou a condicao de vida");
         screenshot(app,pictures,L"ui-regra-vida.png");
+        {
+            aa::MonitorReader healthReader;healthReader.kind=aa::MonitorReaderKind::Health;healthReader.area=app.hud()->areas[0];
+            app.plan.readers={healthReader};app.running=true;app.page=3;app.makeUI();
+            app.current.resize(1);app.current[0].source=app.source;app.current[0].capturedMs=static_cast<std::int64_t>(GetTickCount64());
+            app.current[0].healthFraction=.43f;app.refreshStatus();
+            require(shows(app,L"Vida · Meus status: 43,0%"),
+                    "Monitor nao exibe o percentual lido da area de vida");
+            app.current[0].healthFraction=.494f;app.refreshStatus();
+            require(shows(app,L"Vida · Meus status: 49,4%"),
+                    "Monitor arredondou 49,4 para 49 e divergiu do limiar da regra");
+            app.stop();app.page=2;app.makeUI();
+        }
         choose(app,TriggerList,0);require(app.selectedTrigger==0,"seletor não abriu a condição escolhida");
         choose(app,TriggerList,1);
         app.command(DeleteTrigger,BN_CLICKED);require(app.rule()->triggers.size()==1&&app.selectedTrigger==0,"remover condição alternativa afetou a regra errada");

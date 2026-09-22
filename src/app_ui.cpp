@@ -743,7 +743,8 @@ void App::refreshStatus() {
     } else {
         const auto now=static_cast<std::int64_t>(GetTickCount64());
         for(std::size_t i=0;i<plan.readers.size();++i) {
-            summary+=plan.readers[i].status.name+L" · "+plan.readers[i].area.name+L": ";
+            const bool health=plan.readers[i].kind==aa::MonitorReaderKind::Health;
+            summary+=(health?L"Vida":plan.readers[i].status.name)+L" · "+plan.readers[i].area.name+L": ";
             const bool fresh=i<current.size()&&current[i].source==source&&current[i].capturedMs>0&&
                 now>=current[i].capturedMs&&now-current[i].capturedMs<workspace.validityMs;
             const aa::Observation* shown=fresh?&current[i]:nullptr;
@@ -755,7 +756,12 @@ void App::refreshStatus() {
                     shown=&lastReadings[i];
                 }
             }
-            if(shown) {
+            if(shown&&health) {
+                if(shown->healthFraction&&*shown->healthFraction>=0.f&&*shown->healthFraction<=1.f) {
+                    const int tenths=static_cast<int>(*shown->healthFraction*1000.f+.5f);
+                    summary+=std::to_wstring(tenths/10)+L","+std::to_wstring(tenths%10)+L"%";
+                } else summary+=L"percentual não identificado";
+            } else if(shown) {
                 const auto& detection=shown->detection;
                 if(detection.presence==aa::Presence::Unknown)summary+=L"não confirmado";
                 else if(detection.presence==aa::Presence::Absent)summary+=L"ausente";

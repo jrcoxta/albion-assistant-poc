@@ -1,6 +1,5 @@
 #include "health_reader.h"
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <vector>
 
@@ -14,7 +13,7 @@ Pixel pixelAt(const Image& image, int x, int y) {
 }
 
 bool isBrightRed(Pixel pixel) {
-    return pixel.red >= 80 && pixel.red > pixel.green + 35 && pixel.red > pixel.blue + 35;
+    return pixel.red >= 80 && pixel.red > pixel.green + 65 && pixel.red > pixel.blue + 55;
 }
 
 bool isFilled(Pixel pixel, const HealthCalibration& calibration) {
@@ -26,19 +25,22 @@ bool isFilled(Pixel pixel, const HealthCalibration& calibration) {
 HealthCalibration calibrateHealth(const Image& image) {
     if (!image.valid()) return {};
 
-    int bestStart = 0;
-    int bestEnd = 0;
-    int bestRow = 0;
+    int bestStart = 0, bestEnd = 0, bestRow = 0, bestScore = 0;
+    const int minimumRun = std::max(24, image.width / 12);
     for (int y = 0; y < image.height; ++y) {
         int runStart = 0;
+        int start = image.width, end = 0, score = 0;
         for (int x = 0; x <= image.width; ++x) {
             if (x < image.width && isBrightRed(pixelAt(image, x, y))) continue;
-            if (x - runStart > bestEnd - bestStart) {
-                bestStart = runStart;
-                bestEnd = x;
-                bestRow = y;
+            if (x - runStart >= minimumRun) {
+                start = std::min(start, runStart);
+                end = x;
+                score += x - runStart;
             }
             runStart = x + 1;
+        }
+        if (score > bestScore) {
+            bestStart = start; bestEnd = end; bestRow = y; bestScore = score;
         }
     }
 
@@ -47,13 +49,13 @@ HealthCalibration calibrateHealth(const Image& image) {
     const auto rowMatches = [&](int y) {
         int filled = 0;
         for (int x = bestStart; x < bestEnd; ++x) filled += isBrightRed(pixelAt(image, x, y)) ? 1 : 0;
-        return filled * 10 >= (bestEnd - bestStart) * 9;
+        return filled * 10 >= (bestEnd - bestStart) * 4;
     };
     int top = bestRow;
     int bottom = bestRow + 1;
     while (top > 0 && rowMatches(top - 1)) --top;
     while (bottom < image.height && rowMatches(bottom)) ++bottom;
-    if (bottom - top < 3) return {};
+    if (bottom - top < 5) return {};
 
     unsigned red = 0;
     unsigned green = 0;
@@ -77,18 +79,31 @@ std::optional<float> readHealthFraction(const Image& image, const HealthCalibrat
     if (!image.valid() || !calibration.valid() || calibration.x < 0 || calibration.y < 0 ||
         calibration.x + calibration.width > image.width || calibration.y + calibration.height > image.height) return std::nullopt;
 
-    std::array<float, 3> fractions{};
-    const std::array<int, 3> rows{calibration.y, calibration.y + calibration.height / 2,
-                                  calibration.y + calibration.height - 1};
-    for (std::size_t sample = 0; sample < rows.size(); ++sample) {
+    std::vector<float> fractions;
+    for (int y = calibration.y; y < calibration.y + calibration.height; ++y) {
         int rightmost = calibration.x - 1;
-        for (int x = calibration.x; x < calibration.x + calibration.width; ++x) {
-            if (isFilled(pixelAt(image, x, rows[sample]), calibration)) rightmost = x;
+        int runStart = -1;
+        for (int x = calibration.x; x <= calibration.x + calibration.width; ++x) {
+            if (x < calibration.x + calibration.width && isFilled(pixelAt(image, x, y), calibration)) {
+                if (runStart < 0) runStart = x;
+                continue;
+            }
+            if (runStart < 0) continue;
+            const int runLength = x - runStart;
+            if (rightmost < calibration.x ? runStart <= calibration.x + calibration.width / 8 :
+                runStart - rightmost - 1 <= calibration.width / 3 || runLength >= calibration.width / 10)
+                rightmost = x - 1;
+            runStart = -1;
         }
-        fractions[sample] = static_cast<float>(rightmost - calibration.x + 1) / calibration.width;
+        if (rightmost >= calibration.x)
+            fractions.push_back(static_cast<float>(rightmost - calibration.x + 1) / calibration.width);
     }
+    if (fractions.size() < static_cast<std::size_t>(std::max(3, calibration.height / 2))) return std::nullopt;
     std::sort(fractions.begin(), fractions.end());
-    if (fractions.back() - fractions.front() > .15f) return std::nullopt;
-    return std::clamp(fractions[1], 0.f, 1.f);
+    const float median = fractions[fractions.size() / 2];
+    const auto consistent = std::count_if(fractions.begin(), fractions.end(),
+        [&](float value) { return std::abs(value - median) <= .08f; });
+    if (static_cast<std::size_t>(consistent) * 5 < fractions.size() * 3) return std::nullopt;
+    return std::clamp(median, 0.f, 1.f);
 }
 }
