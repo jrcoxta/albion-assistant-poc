@@ -1,5 +1,16 @@
 # Validação do Albion Assistant
 
+## Falha na regra de vida sobre o inimigo — 22/09/2026
+
+O usuário confirmou que a leitura estava em execução quando a vida do inimigo chegou a `358/835` (42,9%) e a regra **D-ABERTO**, configurada para `≤49%`, não destacou o D. A captura posterior do painel mostra “Leitura parada” porque ele a interrompeu para fotografar; esse estado não explica a falha. A regra está configurada com efeito **Pulso**, não **Borda**.
+
+- **APROVADO — causa reproduzida:** o detector anterior aceitava o marrom do cabeçalho como vermelho e calibrava sua faixa de 3 px em vez da barra de vida. O teste novo reproduziu a falha antes da correção. Agora a calibração distingue a cor, recompõe a largura da barra apesar do texto branco e rejeita calibrações antigas com a aparência do cabeçalho. A medição usa várias linhas, ignora ruído curto isolado e retorna leitura incerta quando não há preenchimento confiável.
+- **APROVADO — diagnóstico no Monitor:** a linha da área de vida mostra o percentual com uma casa decimal ou “percentual não identificado”. O teste de interface reproduziu a ausência dessa informação e a divergência visual de `49,4%` arredondado para `49%` antes da correção.
+- **APROVADO — build/publicação:** testes direcionados `health_reader` e `app_flow` passaram após a reprodução da falha. Build canônico Release em `97752bc` passou 16/16 suítes, publicou somente `dist/AlbionAssistant.exe` e conferiu o SHA-256 `57122D56FD863A20250D4C6BC250DA205F0434ECB106A868EBAF448D3414D835`.
+- **APROVADO — revisão independente:** `/root/health_fix_review` conferiu o diff a partir de `bb0e45f` e aprovou a lógica e os testes sintéticos. Limitou como P3 a possibilidade de um artefato vermelho separado e largo (≥10% da largura da barra) inflar uma leitura; não há evidência desse padrão na captura fornecida.
+- **APROVADO — preservação da sessão:** o Assistant foi fechado pela janela normal. O usuário reabriu pelo caminho habitual e confirmou que a HUD **Monitor 34** e a regra **D-ABERTO** continuam presentes. Uma abertura isolada pelo terminal acessou dados antigos; esse contexto não foi usado para modificar a configuração do usuário.
+- **PENDENTE — jogo real:** com um inimigo a 100% de vida, selecionar **meu-inimigo** e clicar **Calibrar vida cheia** novamente. Depois iniciar leitura com F9, baixar a vida abaixo de 49% e verificar o percentual mostrado no Monitor e o efeito sobre o D. A calibração anterior do cabeçalho não deve ser reutilizada. O screenshot do jogo, sozinho, não comprova ausência de overlay porque a captura pode excluí-lo por configuração.
+
 ## Calibração de vida acessível na HUD — 22/09/2026
 
 O botão **Calibrar vida cheia** só era criado quando uma regra de Vida já apontava para a área. Isso impedia preparar uma área nova antes da regra, como ocorreu na HUD Monitor 34. Agora o botão aparece para qualquer área da HUD e fica habilitado somente após selecionar uma região retangular. Reposicionar a região invalida as medições anteriores de ícone e vida; uma área de vida calibrada também recebe uma descrição própria mesmo sem regra.
