@@ -81,19 +81,39 @@ std::optional<float> radialRemaining(const Image& image,Region icon,const Image&
     // sombra. Refinar pela cromaticidade antes de comparar o relógio.
     float alignmentError=2;
     int alignedX=icon.x,alignedY=icon.y;
+    int robustCount=0,robustX=icon.x,robustY=icon.y;
+    float robustError=2;
+    constexpr float chromaLimit=.08f;
     const int alignment=std::max(2,icon.width/32);
     for(int dy=-alignment;dy<=alignment;++dy) for(int dx=-alignment;dx<=alignment;++dx) {
         const int left=icon.x+dx,top=icon.y+dy;
         if(left<0 || top<0 || left+icon.width>image.width || top+icon.height>image.height) continue;
-        float error=0;
+        float error=0,inlierError=0;
+        int inliers=0;
         for(const auto& p:points) {
             const float total=static_cast<float>(p.reference[0])+p.reference[1]+p.reference[2]+1;
-            error+=difference({p.reference[0]/total,p.reference[1]/total,p.reference[2]/total},color(image,left+p.x,top+p.y));
+            const float delta=difference({p.reference[0]/total,p.reference[1]/total,p.reference[2]/total},color(image,left+p.x,top+p.y));
+            error+=delta;
+            if(delta<chromaLimit) { ++inliers; inlierError+=delta; }
         }
         error/=static_cast<float>(points.size());
         if(error<alignmentError) { alignmentError=error; alignedX=left; alignedY=top; }
+        if(inliers>robustCount || (inliers==robustCount && inlierError<robustError)) {
+            robustCount=inliers; robustError=inlierError; robustX=left; robustY=top;
+        }
     }
-    if(alignmentError>.055f) return {};
+    if(alignmentError>.055f) {
+        // O fundo do mapa pode alterar parte do aro. Use somente pixels cuja
+        // cor ainda combina com a referencia, sem relaxar a prova da frente.
+        if(robustCount<static_cast<int>(points.size()*.55f)) return {};
+        alignedX=robustX; alignedY=robustY;
+        std::erase_if(points,[&](const Point& p) {
+            const float total=static_cast<float>(p.reference[0])+p.reference[1]+p.reference[2]+1;
+            return difference({p.reference[0]/total,p.reference[1]/total,p.reference[2]/total},
+                color(image,alignedX+p.x,alignedY+p.y))>=chromaLimit;
+        });
+        if(points.size()<40) return {};
+    }
     std::vector<float> ratios;
     for(const auto& p:points) {
         const auto* observed=image.bgra.data()+(std::size_t(alignedY+p.y)*image.width+alignedX+p.x)*4;

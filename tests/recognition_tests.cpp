@@ -166,6 +166,18 @@ void checkRadialClock(const std::filesystem::path& assets) {
     check(!real.recognize(last,64).remainingFraction,"Referencia de outro status nao produz relogio");
     const auto nativeFrames=assets.parent_path()/"tests"/"fixtures"/"recognition-clock";
     check(real.setClockReference(aa::loadImage(assets/"assassin-clock-40.png")),"Referencia nativa40 aceita");
+    // Dois recortes da mesma HUD: o mapa muda os pixels do aro, mas nao o
+    // status nem seus tres stacks.
+    const auto mapFrames=assets.parent_path()/"tests"/"fixtures"/"recognition-map";
+    for(const auto& sample:{ClockCase{"dark-icon.png",.77f,.86f},ClockCase{"safe-icon.png",.74f,.82f}}) {
+        const auto measured=real.recognizeNearSize(aa::loadImage(mapFrames/sample.file),40);
+        check(measured.presence==aa::Presence::Present && measured.stacks==3u,
+            "Mapa diferente preserva reconhecimento de Espirito Assassino e tres stacks");
+        if(!measured.remainingFraction || *measured.remainingFraction<sample.low || *measured.remainingFraction>sample.high)
+            std::cerr<<"Relogio mapa "<<sample.file<<": "<<measured.remainingFraction.value_or(-1.f)<<"\n";
+        check(measured.remainingFraction && *measured.remainingFraction>=sample.low && *measured.remainingFraction<=sample.high,
+            "Relogio continua legivel com fundo do mapa escuro ou claro");
+    }
     // Na grade real de 40 px, algumas frentes oferecem apenas quatro pixels
     // de um lado. Todos concordam com a sombra; não é oclusão do contador.
     for(const auto* file:{"162-77563185.png","163-77563227.png","228-77565170.png",
