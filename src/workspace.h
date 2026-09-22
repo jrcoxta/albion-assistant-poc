@@ -1,4 +1,5 @@
 #pragma once
+#include "health_reader.h"
 #include "overlay_effect.h"
 #include "model.h"
 #include <filesystem>
@@ -9,6 +10,7 @@ struct HudArea {
     Region region;
     int iconSize = 48;
     bool iconCalibrated = false;
+    HealthCalibration healthCalibration;
 };
 struct HudLayout {
     std::wstring id, name;
@@ -26,14 +28,31 @@ struct StatusDefinition {
     std::vector<StackSample> stacks;
     std::wstring clockReferencePath;
 };
-struct StatusRule {
-    std::wstring id, statusId;
-    std::wstring sourceArea, targetArea;
+enum class TriggerKind { Status = 0, Health = 1 };
+enum class HealthComparison { AtMost = 0, AtLeast = 1 };
+struct RuleTrigger {
+    std::wstring id, statusId, sourceArea;
     Rule condition;
-    OverlayEffect effect = OverlayEffect::Border;
     std::vector<StackSample> stackSamples;
     std::wstring clockReferencePath;
+    TriggerKind kind = TriggerKind::Status;
+    std::wstring healthArea;
+    HealthComparison healthComparison = HealthComparison::AtMost;
+    unsigned healthPercent = 50;
+};
+struct StatusRule {
+    std::wstring id, targetArea;
+    Rule action;
+    OverlayEffect effect = OverlayEffect::Border;
     bool followClock = false;
+    std::vector<RuleTrigger> triggers;
+
+    // Compatibility fields for schema 1/2 data and old editor code.
+    // Schema 3 persists action + triggers; the first trigger mirrors these fields.
+    std::wstring statusId, sourceArea;
+    Rule condition;
+    std::vector<StackSample> stackSamples;
+    std::wstring clockReferencePath;
 };
 struct SetProfile { std::wstring id, name; std::vector<StatusRule> rules; };
 struct Workspace {

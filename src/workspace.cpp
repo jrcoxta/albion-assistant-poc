@@ -85,6 +85,9 @@ void validate(const Workspace& w) {
             require(area.region.shape == RegionShape::Rectangle || area.region.shape == RegionShape::Circle, "Formato de regiao invalido.");
             require(emptyRegion(area.region) || inBounds(hud, area.region), "Regiao fora das dimensoes da HUD.");
             require(area.iconSize >= 24 && area.iconSize <= 256, "Escala do icone invalida.");
+            if (area.healthCalibration.valid()) require(area.healthCalibration.x >= 0 && area.healthCalibration.y >= 0 &&
+                area.healthCalibration.x + area.healthCalibration.width <= area.region.width &&
+                area.healthCalibration.y + area.healthCalibration.height <= area.region.height, "Calibracao de vida fora da area.");
         }
     }
     for (const auto& status : w.statuses) {
@@ -119,6 +122,15 @@ void validate(const Workspace& w) {
             for(const auto& sample:rule.stackSamples) {
                 require(sample.value>=1&&sample.value<=99&&samples.insert(sample.value).second,"Rotulo de stacks invalido ou duplicado.");
                 textValid(sample.path);
+            }
+            for (const auto& trigger : rule.triggers) {
+                require(trigger.kind == TriggerKind::Status || trigger.kind == TriggerKind::Health, "Tipo de gatilho invalido.");
+                if (trigger.kind == TriggerKind::Health) {
+                    nameValid(trigger.healthArea, true);
+                    require(trigger.healthComparison == HealthComparison::AtMost || trigger.healthComparison == HealthComparison::AtLeast,
+                            "Comparacao de vida invalida.");
+                    require(trigger.healthPercent >= 1 && trigger.healthPercent <= 100, "Percentual de vida invalido.");
+                }
             }
         }
     }
@@ -204,8 +216,8 @@ std::wstring indexed(const std::wstring& prefix, std::size_t index) { return pre
 
 Workspace readWorkspace(const std::filesystem::path& file) {
     IniReader in(file);
-    const auto schema=in.number(L"workspace", L"schema", 2);
-    require(schema==1||schema==2, "Schema de workspace nao suportado.");
+    const auto schema=in.number(L"workspace", L"schema", 4);
+    require(schema>=1&&schema<=4, "Schema de workspace nao suportado.");
     Workspace w;
     w.nextId = in.number(L"workspace", L"nextId", std::numeric_limits<unsigned>::max());
     w.validityMs = static_cast<int>(in.number(L"workspace", L"validityMs", 60000));
@@ -230,6 +242,15 @@ Workspace readWorkspace(const std::filesystem::path& file) {
             a.region.width = static_cast<int>(in.number(child, L"width", 32768)); a.region.height = static_cast<int>(in.number(child, L"height", 32768));
             if (in.contains(child, L"shape")) a.region.shape = static_cast<RegionShape>(in.number(child, L"shape", 1));
             a.iconSize = static_cast<int>(in.number(child, L"iconSize", 256)); a.iconCalibrated = in.number(child, L"iconCalibrated", 1) != 0;
+            if (schema >= 4 && in.number(child, L"healthCalibrated", 1) != 0) {
+                a.healthCalibration.x = static_cast<int>(in.number(child, L"healthX", 32768));
+                a.healthCalibration.y = static_cast<int>(in.number(child, L"healthY", 32768));
+                a.healthCalibration.width = static_cast<int>(in.number(child, L"healthWidth", 32768));
+                a.healthCalibration.height = static_cast<int>(in.number(child, L"healthHeight", 32768));
+                a.healthCalibration.red = static_cast<std::uint8_t>(in.number(child, L"healthRed", 255));
+                a.healthCalibration.green = static_cast<std::uint8_t>(in.number(child, L"healthGreen", 255));
+                a.healthCalibration.blue = static_cast<std::uint8_t>(in.number(child, L"healthBlue", 255));
+            }
             h.areas.push_back(std::move(a));
         }
         w.huds.push_back(std::move(h));
@@ -269,13 +290,24 @@ Workspace readWorkspace(const std::filesystem::path& file) {
             r.effect = in.contains(child, L"effect") ? static_cast<OverlayEffect>(in.number(child, L"effect", 3)) :
                 (legacyGlow ? OverlayEffect::Glow : OverlayEffect::Border);
             if (in.contains(child, L"followClock")) r.followClock = in.number(child, L"followClock", 1) != 0;
-            if(schema==2) {
+            if(schema>=2) {
                 r.clockReferencePath=in.text(child,L"clockReferencePath");
                 const auto samples=in.number(child,L"stackCount",99);
                 for(unsigned k=0;k<samples;++k) {
                     const auto sample=indexed(child+L".stack",k);
                     r.stackSamples.push_back({in.number(sample,L"value",99),in.text(sample,L"path")});
                 }
+            }
+            if(schema>=3) {
+                r.action=r.condition; const auto triggerCount=in.number(child,L"triggerCount",static_cast<unsigned>(childLimit));
+                for(unsigned k=0;k<triggerCount;++k){const auto trigger=indexed(child+L".trigger",k);RuleTrigger t;
+                    t.id=in.text(trigger,L"id");t.statusId=in.text(trigger,L"statusId");t.sourceArea=in.text(trigger,L"sourceArea");
+                    t.condition.condition=static_cast<Condition>(in.number(trigger,L"condition",2));t.condition.stacks=in.number(trigger,L"stacks",99);
+                    t.clockReferencePath=in.text(trigger,L"clockReferencePath");const auto sampleCount=in.number(trigger,L"stackCount",99);
+                    for(unsigned n=0;n<sampleCount;++n){const auto sample=indexed(trigger+L".stack",n);t.stackSamples.push_back({in.number(sample,L"value",99),in.text(sample,L"path")});}
+                    if (schema >= 4) { t.kind=static_cast<TriggerKind>(in.number(trigger,L"kind",1)); t.healthArea=in.text(trigger,L"healthArea");
+                        t.healthComparison=static_cast<HealthComparison>(in.number(trigger,L"healthComparison",1));t.healthPercent=in.number(trigger,L"healthPercent",100); }
+                    r.triggers.push_back(std::move(t));}
             }
             s.rules.push_back(std::move(r));
         }
@@ -287,6 +319,10 @@ Workspace readWorkspace(const std::filesystem::path& file) {
         if(rule.condition.condition==Condition::StacksEqual)
             for(const auto& sample:status->stacks)if(sample.value==rule.condition.stacks)rule.stackSamples.push_back(sample);
         if(rule.followClock)rule.clockReferencePath=status->clockReferencePath;
+    }
+    if(schema<3) for(auto& profile:w.sets) for(auto& rule:profile.rules) {
+        rule.action=rule.condition;
+        rule.triggers={{rule.id+L"-trigger",rule.statusId,rule.sourceArea,rule.condition,rule.stackSamples,rule.clockReferencePath}};
     }
     in.finish(); validate(w); return w;
 }
@@ -435,7 +471,11 @@ void saveWorkspace(const std::filesystem::path& file, const Workspace& w) {
         };
         const auto text = [&](const std::wstring& section, const wchar_t* key, const std::wstring& value) { write(section, key, L"\"" + value + L"\""); };
         const auto number = [&](const std::wstring& section, const wchar_t* key, auto value) { write(section, key, std::to_wstring(value)); };
-        number(L"workspace", L"schema", 2); number(L"workspace", L"nextId", w.nextId);
+        const bool composite=std::any_of(w.sets.begin(),w.sets.end(),[](const auto& profile){return std::any_of(profile.rules.begin(),profile.rules.end(),[](const auto& rule){return rule.triggers.size()>1;});});
+        const bool health=std::any_of(w.huds.begin(),w.huds.end(),[](const auto& hud){return std::any_of(hud.areas.begin(),hud.areas.end(),[](const auto& area){return area.healthCalibration.valid();});}) ||
+            std::any_of(w.sets.begin(),w.sets.end(),[](const auto& profile){return std::any_of(profile.rules.begin(),profile.rules.end(),[](const auto& rule){return std::any_of(rule.triggers.begin(),rule.triggers.end(),[](const auto& trigger){return trigger.kind==TriggerKind::Health;});});});
+        const bool triggerSchema=composite||health;
+        number(L"workspace", L"schema", health?4:(composite?3:2)); number(L"workspace", L"nextId", w.nextId);
         number(L"workspace", L"validityMs", w.validityMs); number(L"workspace", L"shareOverlayInCapture", w.shareOverlayInCapture ? 1 : 0); text(L"workspace", L"activeHudId", w.activeHudId); text(L"workspace", L"activeSetId", w.activeSetId);
         number(L"workspace", L"hudCount", w.huds.size()); number(L"workspace", L"statusCount", w.statuses.size()); number(L"workspace", L"setCount", w.sets.size());
         for (std::size_t i = 0; i < w.huds.size(); ++i) {
@@ -449,6 +489,10 @@ void saveWorkspace(const std::filesystem::path& file, const Workspace& w) {
                 number(child, L"width", a.region.width); number(child, L"height", a.region.height);
                 number(child, L"shape", static_cast<int>(a.region.shape));
                 number(child, L"iconSize", a.iconSize); number(child, L"iconCalibrated", a.iconCalibrated ? 1 : 0);
+                if (health) { number(child,L"healthCalibrated",a.healthCalibration.valid()?1:0); if(a.healthCalibration.valid()) {
+                    number(child,L"healthX",a.healthCalibration.x);number(child,L"healthY",a.healthCalibration.y);
+                    number(child,L"healthWidth",a.healthCalibration.width);number(child,L"healthHeight",a.healthCalibration.height);
+                    number(child,L"healthRed",a.healthCalibration.red);number(child,L"healthGreen",a.healthCalibration.green);number(child,L"healthBlue",a.healthCalibration.blue); } }
             }
         }
         for (std::size_t i = 0; i < w.statuses.size(); ++i) {
@@ -472,6 +516,14 @@ void saveWorkspace(const std::filesystem::path& file, const Workspace& w) {
                 for(std::size_t k=0;k<r.stackSamples.size();++k){
                     const auto sample=indexed(child+L".stack",k);
                     number(sample,L"value",r.stackSamples[k].value);text(sample,L"path",r.stackSamples[k].path);
+                }
+                if(triggerSchema) {
+                    const std::vector<RuleTrigger> fallback={{r.id+L"-trigger",r.statusId,r.sourceArea,r.condition,r.stackSamples,r.clockReferencePath}};
+                    const auto& triggers=r.triggers.empty()?fallback:r.triggers; number(child,L"triggerCount",triggers.size());
+                    for(std::size_t k=0;k<triggers.size();++k){const auto triggerSection=indexed(child+L".trigger",k);const auto& t=triggers[k];
+                        text(triggerSection,L"id",t.id);text(triggerSection,L"statusId",t.statusId);text(triggerSection,L"sourceArea",t.sourceArea);number(triggerSection,L"condition",static_cast<int>(t.condition.condition));number(triggerSection,L"stacks",t.condition.stacks);text(triggerSection,L"clockReferencePath",t.clockReferencePath);number(triggerSection,L"stackCount",t.stackSamples.size());
+                        for(std::size_t n=0;n<t.stackSamples.size();++n){const auto sample=indexed(triggerSection+L".stack",n);number(sample,L"value",t.stackSamples[n].value);text(sample,L"path",t.stackSamples[n].path);}
+                        if(health){number(triggerSection,L"kind",static_cast<int>(t.kind));text(triggerSection,L"healthArea",t.healthArea);number(triggerSection,L"healthComparison",static_cast<int>(t.healthComparison));number(triggerSection,L"healthPercent",t.healthPercent);}}
                 }
             }
         }
@@ -499,8 +551,10 @@ void eraseSet(Workspace& w, const std::wstring& id) {
 void eraseStatus(Workspace& w, const std::wstring& id) {
     const auto copy = id;
     for (const auto& set : w.sets)
-        for (const auto& rule : set.rules)
+        for (const auto& rule : set.rules) {
             require(rule.statusId != copy, "Status usado por uma regra; remova a dependencia antes de excluir.");
+            for (const auto& trigger : rule.triggers) require(trigger.statusId != copy, "Status usado por uma regra; remova a dependencia antes de excluir.");
+        }
     std::erase_if(w.statuses, [&](const auto& s) { return s.id == copy; });
 }
 std::vector<unsigned> stackValues(const StatusDefinition& status) {
@@ -511,55 +565,41 @@ std::vector<unsigned> stackValues(const StatusDefinition& status) {
 }
 std::vector<std::wstring> readinessIssues(const Workspace& w) {
     std::vector<std::wstring> issues;
-    const auto* hud = byId(w.huds, w.activeHudId); const auto* set = byId(w.sets, w.activeSetId);
-    if (!hud) issues.push_back(L"Selecione uma HUD.");
-    if (!set) issues.push_back(L"Selecione um set.");
-    if (!set) return issues;
-    if (hud && (hud->clientWidth <= 0 || hud->clientHeight <= 0)) issues.push_back(L"A HUD precisa de calibração para o tamanho da janela.");
-    if (w.validityMs < 1 || w.validityMs > 60000) issues.push_back(L"Validade das observações inválida.");
-    bool enabled = false;
-    const auto fileExists = [](const std::wstring& path) { std::error_code error; return !path.empty() && std::filesystem::is_regular_file(path, error); };
-    for (std::size_t i = 0; i < set->rules.size(); ++i) {
-        const auto& rule = set->rules[i]; if (!rule.condition.enabled) continue;
-        enabled = true;
-        const auto prefix = L"Regra " + std::to_wstring(i + 1) + L" (" + rule.condition.name + L"): ";
-        const auto issue = [&](const std::wstring& message) { issues.push_back(prefix + message); };
-        const auto* status = byId(w.statuses, rule.statusId);
-        if (!status) issue(L"selecione um status existente.");
-        else {
-            if (status->referencePath.empty()) { if (!status->builtinAssassin) issue(L"o status não possui referência visual."); }
-            else if (!fileExists(status->referencePath)) issue(L"referência visual ausente: " + status->referencePath);
-            if (rule.condition.condition == Condition::StacksEqual) {
-                const auto& samples=rule.stackSamples.empty()?status->stacks:rule.stackSamples;
-                for (const auto& sample : samples)
-                    if (!fileExists(sample.path)) issue(L"amostra de stacks " + std::to_wstring(sample.value) + L" ausente: " + sample.path);
-                std::set<unsigned> values;
-                if(status->builtinAssassin){values.insert(2);values.insert(3);}
-                for(const auto& sample:samples)values.insert(sample.value);
-                if (std::find(values.begin(), values.end(), rule.condition.stacks) == values.end())
-                    issue(L"stacks " + std::to_wstring(rule.condition.stacks) + L" não cadastrados para este status.");
+    const auto* hud=byId(w.huds,w.activeHudId);const auto* set=byId(w.sets,w.activeSetId);
+    if(!hud)issues.push_back(L"Selecione uma HUD.");if(!set)issues.push_back(L"Selecione um perfil.");if(!set)return issues;
+    if(hud&&(hud->clientWidth<=0||hud->clientHeight<=0))issues.push_back(L"A HUD precisa de calibracao para o tamanho da janela.");
+    if(w.validityMs<1||w.validityMs>60000)issues.push_back(L"Validade das observacoes invalida.");
+    const auto exists=[](const std::wstring& path){std::error_code error;return !path.empty()&&std::filesystem::is_regular_file(path,error);};
+    bool enabled=false;
+    for(std::size_t i=0;i<set->rules.size();++i){
+        const auto& rule=set->rules[i];const auto& action=rule.triggers.empty()?rule.condition:rule.action;if(!action.enabled)continue;enabled=true;
+        const auto prefix=L"Regra "+std::to_wstring(i+1)+L" ("+action.name+L"): ";const auto issue=[&](const std::wstring& value){issues.push_back(prefix+value);};
+        const auto area=[&](const std::wstring& name)->const HudArea*{if(!hud)return nullptr;const auto found=std::find_if(hud->areas.begin(),hud->areas.end(),[&](const auto& a){return sameName(a.name,name);});return found==hud->areas.end()?nullptr:&*found;};
+        const auto* target=area(rule.targetArea);if(!target)issue(L"regiao de destino inexistente: "+rule.targetArea);else if(!inBounds(*hud,target->region))issue(L"regiao de destino nao esta calibrada dentro da HUD.");
+        std::vector<RuleTrigger> fallback;if(rule.triggers.empty())fallback={{L"legacy-"+rule.id,rule.statusId,rule.sourceArea,rule.condition,rule.stackSamples,rule.clockReferencePath}};
+        const auto& triggers=rule.triggers.empty()?fallback:rule.triggers;
+        for(std::size_t k=0;k<triggers.size();++k){
+            const auto& trigger=triggers[k];const auto conditionPrefix=triggers.size()>1?L"Condicao "+std::to_wstring(k+1)+L": ":L"";
+            if(trigger.kind==TriggerKind::Health) {
+                const auto* source=area(trigger.healthArea);
+                if(!source)issue(conditionPrefix+L"selecione a area da barra de vida.");
+                else if(!inBounds(*hud,source->region))issue(conditionPrefix+L"a area de vida nao esta calibrada dentro da HUD.");
+                else if(!source->healthCalibration.valid())issue(conditionPrefix+L"na HUD \""+hud->name+L"\", selecione a barra cheia em \""+source->name+L"\" e clique em \"Calibrar vida cheia\".");
+                if(trigger.healthPercent<1||trigger.healthPercent>100)issue(conditionPrefix+L"percentual de vida invalido.");
+                continue;
             }
+            const auto* status=byId(w.statuses,trigger.statusId);if(!status)issue(conditionPrefix+L"selecione um status existente.");
+            else {
+                if(status->referencePath.empty()){if(!status->builtinAssassin)issue(conditionPrefix+L"o status nao possui referencia visual.");}
+                else if(!exists(status->referencePath))issue(conditionPrefix+L"referencia visual ausente: "+status->referencePath);
+                if(trigger.condition.condition==Condition::StacksEqual){
+                    const auto& samples=trigger.stackSamples.empty()?status->stacks:trigger.stackSamples;std::set<unsigned> values;if(status->builtinAssassin){values.insert(2);values.insert(3);}for(const auto& sample:samples){if(!exists(sample.path))issue(conditionPrefix+L"amostra de stacks "+std::to_wstring(sample.value)+L" ausente: "+sample.path);values.insert(sample.value);}if(!values.contains(trigger.condition.stacks))issue(conditionPrefix+L"stacks "+std::to_wstring(trigger.condition.stacks)+L" nao cadastrados para este status.");
+                }
+            }
+            if(trigger.condition.condition!=Condition::StacksEqual&&trigger.condition.condition!=Condition::Present&&trigger.condition.condition!=Condition::Absent)issue(conditionPrefix+L"condicao invalida.");
+            const auto* source=area(trigger.sourceArea);if(!source)issue(conditionPrefix+L"regiao de origem inexistente: "+trigger.sourceArea);else {if(!inBounds(*hud,source->region))issue(conditionPrefix+L"regiao de origem nao esta calibrada dentro da HUD.");if(!source->iconCalibrated||source->iconSize<24||source->iconSize>256||source->iconSize>source->region.width||source->iconSize>source->region.height)issue(conditionPrefix+L"na HUD \""+hud->name+L"\", selecione a area \""+source->name+L"\" e clique em \"Medir \u00edcone de status\".");}
         }
-        if (rule.condition.condition != Condition::StacksEqual && rule.condition.condition != Condition::Present && rule.condition.condition != Condition::Absent)
-            issue(L"condição inválida.");
-        if (!hud) { issue(L"não há HUD ativa para resolver origem e destino."); continue; }
-        const auto area = [&](const std::wstring& name) -> const HudArea* {
-            const auto found = std::find_if(hud->areas.begin(), hud->areas.end(), [&](const auto& a) { return sameName(a.name, name); });
-            return found == hud->areas.end() ? nullptr : &*found;
-        };
-        const auto* source = area(rule.sourceArea); const auto* target = area(rule.targetArea);
-        if (!source) issue(L"região de origem inexistente: " + rule.sourceArea);
-        else {
-            if (!inBounds(*hud, source->region)) issue(L"região de origem não está calibrada dentro da HUD.");
-            if (!source->iconCalibrated || source->iconSize < 24 || source->iconSize > 256 ||
-                source->iconSize > source->region.width || source->iconSize > source->region.height)
-                issue(L"em HUDs, escolha a HUD “" + hud->name + L"”, selecione a área “" + source->name +
-                    L"” e clique em “Medir ícone de status”.");
-        }
-        if (!target) issue(L"região de destino inexistente: " + rule.targetArea);
-        else if (!inBounds(*hud, target->region)) issue(L"região de destino não está calibrada dentro da HUD.");
     }
-    if (!enabled) issues.push_back(L"O set precisa de pelo menos uma regra habilitada.");
-    return issues;
+    if(!enabled)issues.push_back(L"O perfil precisa de pelo menos uma regra ativada.");return issues;
 }
 }

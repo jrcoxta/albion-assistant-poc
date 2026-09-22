@@ -35,7 +35,7 @@ struct Settings {
     unsigned monitorDpi=0;
     bool iconCalibrated=false;
 };
-struct Observation { Detection detection; std::int64_t capturedMs=0; std::uint64_t source=0; };
+struct Observation { Detection detection; std::int64_t capturedMs=0; std::uint64_t source=0; std::optional<float> healthFraction; };
 bool evaluate(const Rule& rule, const Observation& observation, std::int64_t nowMs, int validityMs, std::uint64_t source);
 Settings loadSettings(const std::wstring& path);
 void saveSettings(const std::wstring& path, const Settings& settings);

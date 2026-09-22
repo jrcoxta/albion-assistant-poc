@@ -112,6 +112,25 @@ void roundtripAndIsolation() {
     check(loaded.huds[1].areas[0].region.x == 111 && loaded.huds[1].clientWidth == 3440 &&
           loaded.huds[0].monitorDpi == 144 && loaded.huds[0].areas[0].iconCalibrated,
           "coordenadas e calibracoes separadas por HUD");
+    check(loaded.sets[0].rules[0].triggers.size() == 1 && loaded.sets[0].rules[0].action.name == L"Pronto: 3",
+          "regra salva nao foi migrada para uma acao com um gatilho");
+    {
+        auto health=w;
+        health.huds[0].areas[0].healthCalibration={10,14,180,5,190,42,28};
+        auto& rule=health.sets[0].rules[0]; rule.action=rule.condition;
+        aa::RuleTrigger life; life.id=L"vida-49"; life.kind=aa::TriggerKind::Health; life.healthArea=L"Buffs";
+        life.healthComparison=aa::HealthComparison::AtMost; life.healthPercent=49;
+        rule.triggers={life};
+        const auto healthFile=directory.path/L"vida.ini";
+        aa::saveWorkspace(healthFile,health);
+        const auto restored=aa::loadWorkspace(healthFile,{});
+        const auto& restoredLife=restored.sets[0].rules[0].triggers[0];
+        check(restored.huds[0].areas[0].healthCalibration.valid()&&restoredLife.kind==aa::TriggerKind::Health&&
+              restoredLife.healthArea==L"Buffs"&&restoredLife.healthComparison==aa::HealthComparison::AtMost&&restoredLife.healthPercent==49,
+              "vida calibrada ou condicao nao persistiu");
+    }
+    { auto composite=w; auto& rule=composite.sets[0].rules[0]; rule.action=rule.condition; aa::RuleTrigger first{L"t1",rule.statusId,rule.sourceArea,rule.condition,rule.stackSamples,rule.clockReferencePath}; aa::RuleTrigger second{L"t2",composite.statuses[1].id,L"Buffs",rule.condition,{},{}}; second.condition.condition=aa::Condition::Present; rule.triggers={first,second}; aa::saveWorkspace(directory.path/L"composite.ini",composite); const auto restored=aa::loadWorkspace(directory.path/L"composite.ini",{}); check(restored.sets[0].rules[0].triggers.size()==2&&restored.sets[0].rules[0].triggers[1].statusId==composite.statuses[1].id,"regra composta perdeu condicao ao reabrir"); rejected([&]{aa::eraseStatus(composite,composite.statuses[1].id);},"status usado por segunda condicao pode ser excluido"); }
+
     check(loaded.sets[0].rules.size() == 2 && loaded.sets[0].rules[0].effect == aa::OverlayEffect::Glow &&
           loaded.sets[0].rules[1].condition.condition == aa::Condition::Absent &&
           loaded.sets[0].rules[1].condition.color == 0x123456 &&

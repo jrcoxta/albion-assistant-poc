@@ -1,4 +1,5 @@
 #include "monitor.h"
+#include <algorithm>
 #include <stdexcept>
 #include <iostream>
 namespace {
@@ -81,6 +82,39 @@ int main(){try{
         timed.actions[0].rule.condition.condition=aa::Condition::Absent;readings[0].detection.presence=aa::Presence::Absent;
         require(evaluate()[0]&&!remaining[0],"regra de ausencia mostrou tempo restante");
         readings.clear();require(evaluate()==std::vector<bool>({false,false,false})&&!remaining[0]&&!remaining[1],"lote incompleto manteve aro anterior");
+    }
+    {
+        auto composite=w;
+        auto& combined=composite.sets[0].rules[0]; combined.action=combined.condition;
+        aa::RuleTrigger first; first.id=L"t-first"; first.statusId=combined.statusId; first.sourceArea=combined.sourceArea; first.condition=combined.condition;
+        aa::RuleTrigger alternate; alternate.id=L"t-extra"; alternate.statusId=L"b"; alternate.sourceArea=L"Debuffs"; alternate.condition.condition=aa::Condition::Present;
+        combined.triggers={first,alternate};
+        const auto compositePlan=aa::makeMonitorPlan(composite);
+        require(compositePlan.actions[0].readers.size()==2,"acao composta nao criou um leitor por condicao");
+        auto alternateObservations=obs; alternateObservations[0].detection.presence=aa::Presence::Absent; alternateObservations[1].detection.presence=aa::Presence::Present;
+        require(aa::evaluateMonitor(compositePlan,alternateObservations,1000,750,7)[0],"segunda condicao OU nao ativou a mesma acao");
+    }
+    {
+        auto health=w;
+        health.huds[0].areas[0].healthCalibration={10,4,180,5,190,42,28};
+        auto& combined=health.sets[0].rules[0]; combined.action=combined.condition;
+        aa::RuleTrigger life; life.id=L"vida-49"; life.kind=aa::TriggerKind::Health; life.healthArea=L"Buffs";
+        life.healthComparison=aa::HealthComparison::AtMost; life.healthPercent=49;
+        combined.triggers={life};
+        auto healthPlan=aa::makeMonitorPlan(health);
+        const auto lifeReader=std::find_if(healthPlan.readers.begin(),healthPlan.readers.end(),[](const auto& reader){return reader.kind==aa::MonitorReaderKind::Health;});
+        require(lifeReader!=healthPlan.readers.end(),"gatilho de vida nao criou leitor proprio");
+        const auto lifeIndex=static_cast<std::size_t>(lifeReader-healthPlan.readers.begin());
+        std::vector<aa::Observation> healthReadings(healthPlan.readers.size());
+        for(auto& reading:healthReadings){reading.capturedMs=1000;reading.source=7;}
+        healthReadings[lifeIndex].healthFraction=.49f;
+        require(aa::evaluateMonitor(healthPlan,healthReadings,1000,750,7)[0],"49 por cento nao ativou o limite");
+        healthReadings[lifeIndex].healthFraction=.50f;
+        require(aa::evaluateMonitor(healthPlan,healthReadings,1000,750,7)[0],"histerese soltou antes de 51 por cento");
+        healthReadings[lifeIndex].healthFraction=.52f;
+        require(!aa::evaluateMonitor(healthPlan,healthReadings,1000,750,7)[0],"52 por cento manteve o limite 49 ativo");
+        healthReadings[lifeIndex].healthFraction.reset();
+        require(!aa::evaluateMonitor(healthPlan,healthReadings,1000,750,7)[0],"vida incerta ativou a regra");
     }
     require(aa::evaluateMonitor(plan,obs,1000,750,7)==std::vector<bool>({true,false,false}),"prioridade de destino ou condicao incorreta");
     obs[0].detection.stacks=2;obs[1].detection.presence=aa::Presence::Present;

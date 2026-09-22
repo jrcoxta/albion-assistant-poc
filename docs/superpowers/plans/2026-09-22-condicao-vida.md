@@ -92,7 +92,7 @@ git commit -m "Mede percentual de vida em barra calibrada"
 - Produces RuleTrigger::kind, healthArea, healthComparison and healthPercent.
 - Produces a tagged monitor reader for status or health.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ~~~
 trigger.kind=aa::TriggerKind::Health;
@@ -104,23 +104,23 @@ require(!aa::evaluateMonitor(plan,atHealth(.50f),1010,750,1)[0],"50% ativou limi
 require(restored.huds[0].areas[0].healthCalibration.valid(),"calibração não persistiu");
 ~~~
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: ctest --test-dir build/release -R "workspace|monitor" --output-on-failure
 
 Expected: FAIL because health trigger and calibration do not exist.
 
-- [ ] **Step 3: Write the minimal implementation**
+- [x] **Step 3: Write the minimal implementation**
 
 Add schema 4 and read schemas 1–3 unchanged. Serialize calibration on each HUD area and health fields on each trigger. Add health areas to the union capture rectangle. Unknown health stays inactive. Keep per-trigger hysteresis: <=49 releases above 51; >=49 releases below 47.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run: ctest --test-dir build/release -R "workspace|monitor|health_reader" --output-on-failure
 
 Expected: PASS for persistence, status OU vida, 48–51 thresholds and unknown health.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ~~~
 git add src/model.h src/workspace.h src/workspace.cpp src/monitor.h src/monitor.cpp tests/workspace_tests.cpp tests/monitor_tests.cpp
