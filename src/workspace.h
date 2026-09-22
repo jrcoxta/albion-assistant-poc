@@ -31,6 +31,8 @@ struct StatusRule {
     std::wstring sourceArea, targetArea;
     Rule condition;
     OverlayEffect effect = OverlayEffect::Border;
+    std::vector<StackSample> stackSamples;
+    std::wstring clockReferencePath;
     bool followClock = false;
 };
 struct SetProfile { std::wstring id, name; std::vector<StatusRule> rules; };

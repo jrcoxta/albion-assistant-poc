@@ -474,9 +474,8 @@ int wmain(int argc,wchar_t** argv){
             TestApp imported;imported.configureStorage(folder/L"legacy"/L"settings.ini");
             aa::Settings legacy;legacy.referencePath=app.workspace.statuses[1].referencePath;legacy.rule.stacks=3;
             aa::saveSettings(imported.settingsPath.wstring(),legacy);imported.load();
-            require(imported.workspace.statuses.size()==1&&!imported.workspace.statuses[0].builtinAssassin&&aa::stackValues(imported.workspace.statuses[0])==std::vector<unsigned>({2,3}),"migração não materializou amostras de contadores legados");
-            for(const auto& sample:imported.workspace.statuses[0].stacks)require(aa::loadImage(sample.path).valid(),"amostra legada não gravada");
-            imported.load();require(imported.workspace.statuses[0].stacks.size()==2,"migração repetida duplicou amostras");
+            require(imported.workspace.statuses.size()==1&&!imported.workspace.statuses[0].builtinAssassin&&imported.workspace.statuses[0].stacks.empty()&&imported.workspace.sets[0].rules[0].stackSamples.size()==2,"migração não moveu amostras para regra");
+            imported.load();require(imported.workspace.sets[0].rules[0].stackSamples.size()==2,"migração repetida duplicou amostras da regra");
         }
         std::cout<<"Fluxos de quatro páginas, CRUD, cancelamento, persistência, contadores genéricos, DPI e teste temporário aprovados; sem teste em jogo.\n";return 0;
     }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}

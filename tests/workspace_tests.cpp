@@ -114,10 +114,9 @@ void roundtripAndIsolation() {
           "coordenadas e calibracoes separadas por HUD");
     check(loaded.sets[0].rules.size() == 2 && loaded.sets[0].rules[0].effect == aa::OverlayEffect::Glow &&
           loaded.sets[0].rules[1].condition.condition == aa::Condition::Absent &&
-          loaded.sets[0].rules[1].condition.color == 0x123456 && loaded.statuses[1].debuff &&
-          loaded.statuses[1].referencePath == w.statuses[1].referencePath &&
-          loaded.statuses[1].stacks[0].path == w.statuses[1].stacks[0].path,
-          "roundtrip preserva regras, tipo e referencias de cada status");
+          loaded.sets[0].rules[1].condition.color == 0x123456 &&
+          loaded.statuses[1].referencePath == w.statuses[1].referencePath && loaded.statuses[1].stacks.empty(),
+          "roundtrip preserva regras e referencia sem carregar metadados obsoletos do status");
     check(aa::readinessIssues(loaded).empty(), "modelo calibrado pronto com duas regras");
     auto longText = w;
     longText.statuses[1].referencePath = std::wstring(32000, L'x');
@@ -162,8 +161,8 @@ void shapeCompatibility() {
     check(loaded.huds[0].areas[1].region.shape == aa::RegionShape::Circle, "formato circular nao carregou");
     aa::saveWorkspace(file, loaded);
     const auto roundtrip = aa::loadWorkspace(file, {});
-    check(roundtrip.huds[0].areas[1].region.shape == aa::RegionShape::Circle && roundtrip.sets[0].rules[0].id == loaded.sets[0].rules[0].id &&
-          roundtrip.statuses[1].stacks[0].path == loaded.statuses[1].stacks[0].path, "circulo perdeu forma, regra ou amostra ao reabrir");
+    check(roundtrip.huds[0].areas[1].region.shape == aa::RegionShape::Circle && roundtrip.sets[0].rules[0].id == loaded.sets[0].rules[0].id,
+          "circulo perdeu forma ou regra ao reabrir");
     ini(file, L"hud.0.area.1", L"shape", nullptr);
     check(aa::loadWorkspace(file, {}).huds[0].areas[1].region.shape == aa::RegionShape::Rectangle, "area legada nao assumiu retangulo");
     for (const auto value : {L"2", L"-1", L"", L"x"}) {
@@ -183,17 +182,33 @@ void shapeCompatibility() {
 void clockCompatibility() {
     TemporaryDirectory directory;
     const auto file = directory.path / L"workspace.ini";
-    aa::saveWorkspace(file, populated(directory.path));
+    auto legacyWorkspace=populated(directory.path);
+    legacyWorkspace.statuses[0].stacks={{3,L"amostra-legada-3.png"}};
+    legacyWorkspace.statuses[0].clockReferencePath=L"relogio.png";
+    legacyWorkspace.sets[0].rules[0].followClock=true;
+    aa::saveWorkspace(file, legacyWorkspace);
+    ini(file,L"workspace",L"schema",L"1");
+    ini(file,L"status.0",L"debuff",L"0");
+    ini(file,L"status.0",L"stackCount",L"1");
+    ini(file,L"status.0.stack.0",L"value",L"3");
+    ini(file,L"status.0.stack.0",L"path",L"\"amostra-legada-3.png\"");
+    ini(file,L"status.1",L"debuff",L"0");
+    ini(file,L"status.1",L"stackCount",L"0");
+    for(const auto& section:{L"set.0.rule.0",L"set.0.rule.1",L"set.1.rule.0"}) {
+        ini(file,section,L"clockReferencePath",nullptr);
+        ini(file,section,L"stackCount",nullptr);
+    }
     ini(file, L"set.0.rule.0", L"followClock", L"1");
     ini(file, L"status.0", L"clockReferencePath", L"\"relogio.png\"");
     const auto loaded = aa::loadWorkspace(file, {});
     check(loaded.sets[0].rules[0].condition.name == L"Pronto: 3", "relogio alterou regra existente");
-    check(loaded.sets[0].rules[0].followClock && loaded.statuses[0].clockReferencePath == L"relogio.png", "opcao/referencia do relogio nao lida");
+    check(loaded.sets[0].rules[0].followClock && loaded.sets[0].rules[0].clockReferencePath == L"relogio.png", "opcao/referencia do relogio nao migrou para regra");
+    check(loaded.sets[0].rules[0].stackSamples.size()==1 && loaded.sets[0].rules[0].stackSamples[0].value==3 &&
+          loaded.sets[0].rules[0].stackSamples[0].path==L"amostra-legada-3.png", "amostra legada nao migrou para regra");
     aa::saveWorkspace(file, loaded);
     const auto roundtrip=aa::loadWorkspace(file, {});
-    check(roundtrip.sets[0].rules[0].followClock && roundtrip.statuses[0].clockReferencePath==loaded.statuses[0].clockReferencePath &&
+    check(roundtrip.sets[0].rules[0].followClock && roundtrip.sets[0].rules[0].clockReferencePath==loaded.sets[0].rules[0].clockReferencePath &&
           roundtrip.huds[0].areas[0].region.x==loaded.huds[0].areas[0].region.x, "relogio nao persiste ou altera HUD");
-    check(aa::readinessIssues(roundtrip).empty(), "referencia temporal ausente bloqueou leitura e aura");
     ini(file, L"set.0.rule.0", L"followClock", nullptr);
     ini(file, L"status.0", L"clockReferencePath", nullptr);
     const auto legacy=aa::loadWorkspace(file, {});
@@ -270,7 +285,7 @@ void invalidData() {
         [](const auto& entry) { return entry.path().filename().wstring().find(L".tmp-") != std::wstring::npos; }),
         "falha atomica limpa somente seu arquivo temporario");
     const struct { const wchar_t* section; const wchar_t* key; const wchar_t* value; } corruptions[] = {
-        {L"workspace", L"schema", L"2"}, {L"workspace", L"hudCount", L"-1"},
+        {L"workspace", L"schema", L"3"}, {L"workspace", L"hudCount", L"-1"},
         {L"workspace", L"hudCount", L"1"}, {L"workspace", L"statusCount", L"65"},
         {L"workspace", L"validityMs", L"750x"}, {L"workspace", L"activeHudId", L"missing"},
         {L"hud.0", L"name", nullptr}, {L"hud.0.area.0", L"iconCalibrated", L"2"},
@@ -339,12 +354,13 @@ void migration() {
     std::ofstream(two) << "fixture"; std::ofstream(three) << "fixture";
     const auto explicitCustom = aa::loadWorkspace(custom.path / L"workspace-explicit.ini", custom.path / L"settings.ini",
         {{2, two.wstring()}, {3, three.wstring()}});
-    check(!explicitCustom.statuses[0].builtinAssassin && explicitCustom.statuses[0].referencePath == customSettings.referencePath &&
-          aa::stackValues(explicitCustom.statuses[0]) == std::vector<unsigned>({2, 3}) &&
-          explicitCustom.statuses[0].stacks[1].path == three.wstring() && aa::readinessIssues(explicitCustom).empty(),
-          "contadores legados fornecidos sao amostras explicitas do status custom");
-    check(aa::loadWorkspace(custom.path / L"workspace-explicit.ini", custom.path / L"settings.ini").statuses[0].stacks.size() == 2,
-          "amostras explicitas persistem sem precisar de reimportacao");
+    check(!explicitCustom.statuses[0].builtinAssassin && explicitCustom.statuses[0].referencePath == customSettings.referencePath,
+          "importacao custom perdeu identidade do status");
+    check(explicitCustom.sets[0].rules[0].stackSamples.size()==2 && explicitCustom.sets[0].rules[0].stackSamples[1].path==three.wstring(),
+          "contador legado nao foi salvo na regra");
+    check(aa::readinessIssues(explicitCustom).empty(), "amostra legada valida deixou regra pendente");
+    check(aa::loadWorkspace(custom.path / L"workspace-explicit.ini", custom.path / L"settings.ini").sets[0].rules[0].stackSamples.size() == 2,
+          "amostra explicita persiste sem precisar de reimportacao");
     TemporaryDirectory names;
     auto whitespace = legacy(L"  Notebook antigo  ");
     whitespace.rule.name = L"  Regra antiga  "; whitespace.rule.profile = std::wstring(250, L'A');

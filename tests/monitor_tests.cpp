@@ -27,6 +27,20 @@ int main(){try{
     require(plan.readers[0].needsStacks&&!plan.readers[1].needsStacks,"presença/ausência exigiu contadores");
     require(!plan.readers[0].needsClock&&!plan.readers[1].needsClock,"regra antiga solicitou relogio");
     {
+        auto scoped=w;
+        const auto fixture=std::filesystem::path(__FILE__).wstring();
+        scoped.sets[0].rules[0].stackSamples={{3,fixture}};
+        scoped.sets[0].rules[2].condition.condition=aa::Condition::StacksEqual;
+        scoped.sets[0].rules[2].condition.stacks=2;
+        scoped.sets[0].rules[2].stackSamples={{2,fixture}};
+        const auto isolated=aa::makeMonitorPlan(scoped);
+        require(isolated.readers.size()==3,"regras com amostras distintas compartilharam leitor");
+        require(isolated.readers[0].status.stacks.size()==1&&isolated.readers[0].status.stacks[0].value==3,
+                "leitor da primeira regra nao recebeu somente sua amostra");
+        require(isolated.readers[2].status.stacks.size()==1&&isolated.readers[2].status.stacks[0].value==2,
+                "leitor da segunda regra nao recebeu somente sua amostra");
+    }
+    {
         auto clocks=w;clocks.sets[0].rules[2].followClock=true;
         clocks.sets[0].rules[1].followClock=true;clocks.sets[0].rules[1].condition.condition=aa::Condition::Absent;
         const auto timed=aa::makeMonitorPlan(clocks);

@@ -113,6 +113,13 @@ void validate(const Workspace& w) {
             require(rule.condition.stacks >= 1 && rule.condition.stacks <= 99 && rule.condition.color <= 0xFFFFFF,
                     "Stacks ou cor da regra invalidos.");
             require(rule.effect >= OverlayEffect::Border && rule.effect <= OverlayEffect::Halo, "Efeito de regra invalido.");
+            textValid(rule.clockReferencePath);
+            require(rule.stackSamples.size() <= 99, "Limite de 99 amostras de stacks excedido.");
+            std::set<unsigned> samples;
+            for(const auto& sample:rule.stackSamples) {
+                require(sample.value>=1&&sample.value<=99&&samples.insert(sample.value).second,"Rotulo de stacks invalido ou duplicado.");
+                textValid(sample.path);
+            }
         }
     }
     idValid(w.activeHudId, true); idValid(w.activeSetId, true);
@@ -197,7 +204,8 @@ std::wstring indexed(const std::wstring& prefix, std::size_t index) { return pre
 
 Workspace readWorkspace(const std::filesystem::path& file) {
     IniReader in(file);
-    require(in.number(L"workspace", L"schema", 1) == 1, "Schema de workspace nao suportado.");
+    const auto schema=in.number(L"workspace", L"schema", 2);
+    require(schema==1||schema==2, "Schema de workspace nao suportado.");
     Workspace w;
     w.nextId = in.number(L"workspace", L"nextId", std::numeric_limits<unsigned>::max());
     w.validityMs = static_cast<int>(in.number(L"workspace", L"validityMs", 60000));
@@ -230,13 +238,16 @@ Workspace readWorkspace(const std::filesystem::path& file) {
         const auto section = indexed(L"status", i);
         StatusDefinition s;
         s.id = in.text(section, L"id"); s.name = in.text(section, L"name");
-        s.debuff = in.number(section, L"debuff", 1) != 0; s.builtinAssassin = in.number(section, L"builtinAssassin", 1) != 0;
+        if(schema==1)s.debuff = in.number(section, L"debuff", 1) != 0;
+        s.builtinAssassin = in.number(section, L"builtinAssassin", 1) != 0;
         s.referencePath = in.text(section, L"referencePath");
-        if (in.contains(section, L"clockReferencePath")) s.clockReferencePath = in.text(section, L"clockReferencePath");
-        const auto count = in.number(section, L"stackCount", 99);
-        for (unsigned j = 0; j < count; ++j) {
-            const auto child = indexed(section + L".stack", j);
-            s.stacks.push_back({in.number(child, L"value", 99), in.text(child, L"path")});
+        if(schema==1) {
+            if (in.contains(section, L"clockReferencePath")) s.clockReferencePath = in.text(section, L"clockReferencePath");
+            const auto count = in.number(section, L"stackCount", 99);
+            for (unsigned j = 0; j < count; ++j) {
+                const auto child = indexed(section + L".stack", j);
+                s.stacks.push_back({in.number(child, L"value", 99), in.text(child, L"path")});
+            }
         }
         w.statuses.push_back(std::move(s));
     }
@@ -258,9 +269,24 @@ Workspace readWorkspace(const std::filesystem::path& file) {
             r.effect = in.contains(child, L"effect") ? static_cast<OverlayEffect>(in.number(child, L"effect", 3)) :
                 (legacyGlow ? OverlayEffect::Glow : OverlayEffect::Border);
             if (in.contains(child, L"followClock")) r.followClock = in.number(child, L"followClock", 1) != 0;
+            if(schema==2) {
+                r.clockReferencePath=in.text(child,L"clockReferencePath");
+                const auto samples=in.number(child,L"stackCount",99);
+                for(unsigned k=0;k<samples;++k) {
+                    const auto sample=indexed(child+L".stack",k);
+                    r.stackSamples.push_back({in.number(sample,L"value",99),in.text(sample,L"path")});
+                }
+            }
             s.rules.push_back(std::move(r));
         }
         w.sets.push_back(std::move(s));
+    }
+    if(schema==1) for(auto& set:w.sets) for(auto& rule:set.rules) {
+        const auto status=std::find_if(w.statuses.begin(),w.statuses.end(),[&](const auto& value){return value.id==rule.statusId;});
+        if(status==w.statuses.end())continue;
+        if(rule.condition.condition==Condition::StacksEqual)
+            for(const auto& sample:status->stacks)if(sample.value==rule.condition.stacks)rule.stackSamples.push_back(sample);
+        if(rule.followClock)rule.clockReferencePath=status->clockReferencePath;
     }
     in.finish(); validate(w); return w;
 }
@@ -326,7 +352,6 @@ void importLegacy(Workspace& w, const Settings& old, const std::filesystem::path
         StatusDefinition status;
         status.id = newId(w); status.name = uniqueName(w.statuses, L"Espírito Assassino");
         status.builtinAssassin = reference.empty(); status.referencePath = reference; statusId = status.id;
-        if (!status.builtinAssassin) status.stacks = legacyStacks;
         w.statuses.push_back(std::move(status));
     }
     auto importedRule = old.rule;
@@ -347,6 +372,7 @@ void importLegacy(Workspace& w, const Settings& old, const std::filesystem::path
         set.id = newId(w); set.name = uniqueName(w.sets, importedRule.profile);
         StatusRule rule;
         rule.id = newId(w); rule.statusId = statusId; rule.sourceArea = L"Buffs"; rule.targetArea = L"Destaque"; rule.condition = importedRule;
+        rule.stackSamples=legacyStacks;
         set.rules.push_back(std::move(rule)); setId = set.id; w.sets.push_back(std::move(set));
     }
     if (active) { w.activeHudId = hudId; w.activeSetId = setId; w.validityMs = old.validityMs; }
@@ -409,7 +435,7 @@ void saveWorkspace(const std::filesystem::path& file, const Workspace& w) {
         };
         const auto text = [&](const std::wstring& section, const wchar_t* key, const std::wstring& value) { write(section, key, L"\"" + value + L"\""); };
         const auto number = [&](const std::wstring& section, const wchar_t* key, auto value) { write(section, key, std::to_wstring(value)); };
-        number(L"workspace", L"schema", 1); number(L"workspace", L"nextId", w.nextId);
+        number(L"workspace", L"schema", 2); number(L"workspace", L"nextId", w.nextId);
         number(L"workspace", L"validityMs", w.validityMs); number(L"workspace", L"shareOverlayInCapture", w.shareOverlayInCapture ? 1 : 0); text(L"workspace", L"activeHudId", w.activeHudId); text(L"workspace", L"activeSetId", w.activeSetId);
         number(L"workspace", L"hudCount", w.huds.size()); number(L"workspace", L"statusCount", w.statuses.size()); number(L"workspace", L"setCount", w.sets.size());
         for (std::size_t i = 0; i < w.huds.size(); ++i) {
@@ -427,13 +453,8 @@ void saveWorkspace(const std::filesystem::path& file, const Workspace& w) {
         }
         for (std::size_t i = 0; i < w.statuses.size(); ++i) {
             const auto section = indexed(L"status", i); const auto& s = w.statuses[i];
-            text(section, L"id", s.id); text(section, L"name", s.name); number(section, L"debuff", s.debuff ? 1 : 0);
-            number(section, L"builtinAssassin", s.builtinAssassin ? 1 : 0); text(section, L"referencePath", s.referencePath); number(section, L"stackCount", s.stacks.size());
-            text(section, L"clockReferencePath", s.clockReferencePath);
-            for (std::size_t j = 0; j < s.stacks.size(); ++j) {
-                const auto child = indexed(section + L".stack", j);
-                number(child, L"value", s.stacks[j].value); text(child, L"path", s.stacks[j].path);
-            }
+            text(section, L"id", s.id); text(section, L"name", s.name);
+            number(section, L"builtinAssassin", s.builtinAssassin ? 1 : 0); text(section, L"referencePath", s.referencePath);
         }
         for (std::size_t i = 0; i < w.sets.size(); ++i) {
             const auto section = indexed(L"set", i); const auto& s = w.sets[i];
@@ -447,6 +468,11 @@ void saveWorkspace(const std::filesystem::path& file, const Workspace& w) {
                 number(child, L"glow", r.effect == OverlayEffect::Border ? 0 : 1);
                 number(child, L"effect", static_cast<int>(r.effect));
                 number(child, L"followClock", r.followClock ? 1 : 0);
+                text(child,L"clockReferencePath",r.clockReferencePath);number(child,L"stackCount",r.stackSamples.size());
+                for(std::size_t k=0;k<r.stackSamples.size();++k){
+                    const auto sample=indexed(child+L".stack",k);
+                    number(sample,L"value",r.stackSamples[k].value);text(sample,L"path",r.stackSamples[k].path);
+                }
             }
         }
         // A chamada de flush retorna zero tambem quando tem sucesso; verificar disco abaixo.
@@ -504,9 +530,12 @@ std::vector<std::wstring> readinessIssues(const Workspace& w) {
             if (status->referencePath.empty()) { if (!status->builtinAssassin) issue(L"o status não possui referência visual."); }
             else if (!fileExists(status->referencePath)) issue(L"referência visual ausente: " + status->referencePath);
             if (rule.condition.condition == Condition::StacksEqual) {
-                for (const auto& sample : status->stacks)
+                const auto& samples=rule.stackSamples.empty()?status->stacks:rule.stackSamples;
+                for (const auto& sample : samples)
                     if (!fileExists(sample.path)) issue(L"amostra de stacks " + std::to_wstring(sample.value) + L" ausente: " + sample.path);
-                const auto values = stackValues(*status);
+                std::set<unsigned> values;
+                if(status->builtinAssassin){values.insert(2);values.insert(3);}
+                for(const auto& sample:samples)values.insert(sample.value);
                 if (std::find(values.begin(), values.end(), rule.condition.stacks) == values.end())
                     issue(L"stacks " + std::to_wstring(rule.condition.stacks) + L" não cadastrados para este status.");
             }

@@ -11,13 +11,22 @@ MonitorPlan makeMonitorPlan(const Workspace& workspace){
     if(hud==workspace.huds.end()||set==workspace.sets.end())throw std::runtime_error("Escolha uma HUD e um set.");
     for(const auto& rule:set->rules){
         if(!rule.condition.enabled)continue;
-        auto reader=std::find_if(result.readers.begin(),result.readers.end(),[&](const auto& r){return r.status.id==rule.statusId&&sameName(r.area.name,rule.sourceArea);});
+        const auto status=std::find_if(workspace.statuses.begin(),workspace.statuses.end(),[&](const auto& s){return s.id==rule.statusId;});
+        if(status==workspace.statuses.end())throw std::runtime_error("Dependência da regra ausente.");
+        auto materialized=*status;
+        if(rule.condition.condition==Condition::StacksEqual&&!rule.stackSamples.empty())materialized.stacks=rule.stackSamples;
+        if(rule.followClock&&!rule.clockReferencePath.empty())materialized.clockReferencePath=rule.clockReferencePath;
+        const auto sameSamples=[](const auto& left,const auto& right){
+            return left.size()==right.size()&&std::equal(left.begin(),left.end(),right.begin(),[](const auto& a,const auto& b){return a.value==b.value&&a.path==b.path;});
+        };
+        auto reader=std::find_if(result.readers.begin(),result.readers.end(),[&](const auto& r){
+            return r.status.id==rule.statusId&&sameName(r.area.name,rule.sourceArea)&&sameSamples(r.status.stacks,materialized.stacks)&&r.status.clockReferencePath==materialized.clockReferencePath;
+        });
         std::size_t index=static_cast<std::size_t>(reader-result.readers.begin());
         if(reader==result.readers.end()){
-            const auto status=std::find_if(workspace.statuses.begin(),workspace.statuses.end(),[&](const auto& s){return s.id==rule.statusId;});
             const auto area=std::find_if(hud->areas.begin(),hud->areas.end(),[&](const auto& a){return sameName(a.name,rule.sourceArea);});
-            if(status==workspace.statuses.end()||area==hud->areas.end())throw std::runtime_error("Dependência da regra ausente.");
-            result.readers.push_back({*status,*area});
+            if(area==hud->areas.end())throw std::runtime_error("Dependência da regra ausente.");
+            result.readers.push_back({std::move(materialized),*area});
             const auto r=area->region;
             if(!result.captureArea.valid()){result.captureArea=r;result.captureArea.shape=RegionShape::Rectangle;}
             else{
