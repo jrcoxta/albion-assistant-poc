@@ -1,5 +1,12 @@
 # Validação do Albion Assistant
 
+## Botões diretos da HUD — 22/09/2026
+
+Base `e1e52fb`. A pedido do usuário, o menu “Opções da HUD” foi removido. Ações diretas “Renomear HUD” e “Excluir HUD” ocupam o espaço ao lado do seletor, preservando os fluxos de confirmação e renomeação existentes.
+
+- **APROVADO — testes e publicação:** build canônico Release, 15/15 testes aprovados e único `dist/AlbionAssistant.exe` publicado. SHA-256 `4008983920FF39C52B6BE14BD6F6406807F01EE56A67B39DF8F98A631060C9A2` será preenchido a partir da evidência atual do build.
+- **APROVADO — revisão independente:** `/root/hud_qa` confirmou a remoção completa do menu, uso dos fluxos existentes e cobertura dos botões/ausência de “Opções da HUD”, sem achados pendentes.
+
 ## Ações da HUD selecionada — 22/09/2026
 
 Base `c3d2212`. O seletor da aba HUDs contém “+ Criar HUD”; Opções da HUD reúne Renomear/Excluir. O campo permanente de nome e os botões avulsos de criar/excluir foram removidos. Renomear abre nome atual com Salvar/Cancelar e atualiza cabeçalho/seletor após persistir, preservando identidade e áreas.
@@ -258,3 +265,4 @@ O registro está em [evidencias/ciclo-ao-vivo.csv](evidencias/ciclo-ao-vivo.csv)
 O Windows permaneceu bloqueado durante as alterações anteriores de interface e empacotamento. Depois, o usuário abriu o programa e relatou sucesso no jogo. As novas páginas, a leitura simultânea de vários status e o brilho ainda precisam ser conferidos nesse ambiente. O monitor físico de 34 polegadas, HDR, outras escalas reais e sessões longas de combate não foram validados.
 
 Para conferir: siga o roteiro do [README](../README.md), começando pelo set importado. Depois cadastre outro status, use duas regras simultâneas e verifique os destaques. Crie uma HUD para o monitor de 34 polegadas com os mesmos nomes de áreas e reutilize o set; voltar ao notebook deve restaurar suas posições. A demonstração de cinco segundos verifica a ação; o ciclo real sem número → 2 → 3 → ausente verifica a regra.
+
