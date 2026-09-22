@@ -1,5 +1,14 @@
 # Validação do Albion Assistant
 
+## Cadastro com nome antes de criar — 22/09/2026
+
+Base `4dec3e9`. Ajuste autorizado pelo usuário: primeiro item recebe nome na própria aba; itens adicionais usam formulário Criar/Cancelar. HUDs, áreas, status, perfis e regras seguem o mesmo padrão. Inclui correções de estados vazios, preview nas abas corretas, persistência das escolhas e limpeza de amostras/relógio ao trocar o status de uma regra.
+
+- **APROVADO — testes automáticos:** build canônico Release, 15/15. Exercita criação, cancelamento, rejeição de nomes vazios/duplicados, persistência e preservação do nome em edição durante reconstrução da janela. Executável único publicado: SHA-256 `4A4634D9B35DB4D0E98F435CEE6B8EDA169683A84E27D65C826E6FA632771F23`.
+- **APROVADO — revisão independente:** `/root/hud_review` (produto/arquitetura) e `/root/hud_qa` (QA estático). Corrigidos achados: acesso às HUDs remanescentes após exclusão; amostras indevidas ao trocar status; perda do nome inicial ao reconstruir em outro DPI.
+- **APROVADO — teste funcional manual da HUD:** Computer Use na aplicação publicada com dados isolados em `build/ux-create-check`. Nome preenchido antes de criar, HUD criada como “Monitor de teste”, formulário adicional aberto e cancelado. Persistência conferida: `hudCount=1`, nome correto. Inspeção visual do estado inicial, próxima área e diálogo Criar/Cancelar, sem sobreposição.
+- **PENDENTE — reformulação completa:** Monitorar com Resolver, reorganização completa do editor de regras e teste de todas as telas no jogo permanecem fora da aprovação deste bloco. O teste manual acima não valida reconhecimento nem overlay no jogo.
+
 ## Em validação: aro preditivo por status
 
 Base `1372325`, 21/09/2026. Usuário autorizou prever o relógio e ajustar seu término ao desaparecimento observado. Critérios: projeção contínua entre leituras radiais; presença/stacks atuais continuam controlando a ação; renovação reinicia o ciclo; captura inválida, pausa, fonte diferente e leituras expiradas invalidam previsão; observação original preservada; aprendizado separado por leitor e limitado à sessão. Término antecipado só pode ser aprendido após múltiplos ciclos concordantes, nunca com um desaparecimento isolado.

@@ -163,7 +163,7 @@ std::optional<std::wstring> requestName(App& app,int id){
     if(id==NewHud){prompt.title=L"Nova HUD";prompt.hint=L"Use um nome para esta tela ou layout, como Monitor 34.\nDepois, selecione as áreas do jogo.";}
     else if(id==NewArea){prompt.title=L"Nova área";prompt.hint=L"Use um nome como Meus status ou E.\nDepois, selecione onde essa área fica no jogo.";}
     else if(id==NewStatus){prompt.title=L"Novo status";prompt.hint=L"Dê um nome ao buff ou debuff.\nDepois, capture ou importe sua imagem.";}
-    else if(id==NewSet){prompt.title=L"Novo set";prompt.hint=L"Use o nome da arma ou do conjunto que está usando.\nDepois, adicione suas regras.";}
+    else if(id==NewSet){prompt.title=L"Novo perfil";prompt.hint=L"Use o nome da arma ou do conjunto que está usando.\nDepois, adicione suas regras.";}
     struct alignas(DWORD) Template{DLGTEMPLATE dialog{};WORD menu=0,windowClass=0,title=0;} layout;
     layout.dialog.style=WS_POPUP|WS_CAPTION|WS_SYSMENU|DS_MODALFRAME;layout.dialog.cx=240;layout.dialog.cy=150;
     struct SelectionGuard{bool& selecting;bool previous;~SelectionGuard(){selecting=previous;}} guard{app.selecting,app.selecting};app.selecting=true;
@@ -252,11 +252,35 @@ void App::makeUI() {
         control(L"EDIT",L"",WS_TABSTOP|WS_BORDER|WS_VSCROLL|ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL,24,275,808,159,MonitorSummary);
         label(L"Última captura da área monitorada",24,449,620);button(L"Salvar ajuste",Save,664,444,168);
     } else if(page==0) {
+        if(!hud()) {
+            const bool firstHud=workspace.huds.empty();
+            auto heading=control(L"STATIC",firstHud?L"Sua tela, do seu jeito":L"Escolha uma HUD para continuar",0,64,210,720,40);
+            SendMessageW(heading,WM_SETFONT,reinterpret_cast<WPARAM>(titleFont),FALSE);
+            if(firstHud) {
+                label(L"Crie uma HUD para organizar as áreas do jogo que você quer acompanhar.",64,266,720,30);
+                label(L"Depois, marque onde os status aparecem e onde os destaques devem surgir.\nVocê pode guardar uma HUD para cada tela ou organização do jogo.",64,309,700,60);
+            } else {
+                label(L"Suas outras HUDs continuam salvas. Selecione a que deseja editar.",64,266,720,30);
+                hudChoices(64,320,500);
+            }
+            if(firstHud){label(L"Nome da HUD",64,386,500);edit(L"",720,64,412,500);}
+            button(firstHud?L"Criar HUD":L"Criar outra HUD",NewHud,64,462,300);
+            theme::styleControl(item(NewHud),theme::Role::Primary);
+        } else {
         label(L"HUDs salvas",24,136,350);hudChoices(24,158,350);
         label(L"Nome da HUD",394,136,268);edit(hud()?hud()->name.c_str():L"",HudName,394,158,268);
         button(L"Nova HUD",NewHud,680,156,152);button(L"Excluir HUD",DeleteHud,680,198,152);
         auto screen=hud()&&hud()->clientWidth>0?std::to_wstring(hud()->clientWidth)+L" × "+std::to_wstring(hud()->clientHeight)+L" px · DPI "+std::to_wstring(hud()->monitorDpi):L"A tela será registrada ao selecionar a primeira área.";
         label(screen.c_str(),24,207,632,38);
+        if(hud()->areas.empty()) {
+            selectedArea=-1;
+            auto heading=control(L"STATIC",L"Adicione a primeira área",0,64,298,700,36);
+            SendMessageW(heading,WM_SETFONT,reinterpret_cast<WPARAM>(titleFont),FALSE);
+            label(L"Dê um nome como Meus status ou Habilidade E.\nEm seguida, selecione a posição no jogo usando um círculo ou retângulo.",64,350,700,60);
+            label(L"Nome da área",64,423,500);edit(L"",720,64,450,500);
+            button(L"Criar área",NewArea,64,502,240);
+            theme::styleControl(item(NewArea),theme::Role::Primary);
+        } else {
         label(L"Áreas desta HUD",24,250,238);
         auto areas=list(AreaList,24,275,238,249);
         if(hud())for(const auto& value:hud()->areas)add(areas,value.name,true);
@@ -270,11 +294,22 @@ void App::makeUI() {
         const bool circularRead=area()&&area()->region.shape==aa::RegionShape::Circle&&areaUsage(workspace,area()->name).read;
         label(circularRead?L"Enquadre o ícone inteiro; centros fora do círculo são ignorados.\nUse nomes iguais em HUDs diferentes para reutilizar seus sets.\nAo renomear uma área, atualize também as regras.":
             L"Use nomes iguais em HUDs diferentes para reutilizar seus sets.\nRenomear uma área exige atualizar o nome nas regras correspondentes.",282,479,550,60);
-        button(L"Nova área",NewArea,24,547,112);button(L"Excluir área",DeleteArea,148,547,114);button(L"Salvar HUD",Save,664,547,168);
-        for(int id:{HudName,DeleteHud,NewArea,Save})EnableWindow(item(id),hud()!=nullptr);
+        button(L"Nova área",NewArea,24,547,112);button(L"Excluir área",DeleteArea,148,547,114);
+        theme::styleControl(item(SelectArea),theme::Role::Primary);
+        label(L"Alterações salvas automaticamente",282,553,550);
         for(int id:{AreaName,DeleteArea,SelectArea})EnableWindow(item(id),area()!=nullptr);
         EnableWindow(item(CalibrateArea),area()&&area()->region.valid());
+        }
+        }
     } else if(page==1) {
+        if(workspace.statuses.empty()) {
+            auto heading=control(L"STATIC",L"O que você quer acompanhar?",0,64,210,720,40);
+            SendMessageW(heading,WM_SETFONT,reinterpret_cast<WPARAM>(titleFont),FALSE);
+            label(L"Cadastre a imagem de um buff ou debuff que aparece no jogo.\nDepois, use esse status nas regras dos seus perfis.",64,276,700,60);
+            label(L"Nome do status",64,357,500);edit(L"",720,64,384,500);
+            button(L"Criar status",NewStatus,64,445,300);
+            theme::styleControl(item(NewStatus),theme::Role::Primary);
+        } else {
         label(L"Biblioteca compartilhada",24,136,238);auto statuses=list(StatusList,24,160,238,364);
         for(const auto& value:workspace.statuses)add(statuses,value.name,true);
         if(!selectedStatus()&&!workspace.statuses.empty())selectedStatusId=workspace.statuses.front().id;
@@ -287,7 +322,7 @@ void App::makeUI() {
         label(L"Imagem de referência",282,304,550);
         button(L"Capturar relógio",CaptureClock,282,491,260);
         button(L"Novo status",NewStatus,24,547,112);button(L"Excluir status",DeleteStatus,148,547,114);
-        button(L"Salvar status",Save,644,547,188);
+        label(L"Alterações salvas automaticamente",282,553,550);
         label(L"Renove o status antes de capturar o relógio; selecione o ícone inteiro, sem sombra.",24,584,808,24);
         referencePreview={};
         if(selectedStatus()) {
@@ -297,10 +332,29 @@ void App::makeUI() {
             }catch(const std::exception& e){error=L"Não foi possível abrir a referência: "+widen(e.what());}
         }
         for(int id:{StatusName,CaptureStatus,ImportStatus,DeleteStatus,CaptureClock,Save})EnableWindow(item(id),selectedStatus()!=nullptr);
+        }
     } else {
-        label(L"Sets salvos",24,136,284);setChoices(24,158,284);
-        label(L"Nome do set",326,136,326);edit(set()?set()->name.c_str():L"",SetName,326,158,326);
-        button(L"Novo set",NewSet,670,156,162);button(L"Excluir set",DeleteSet,670,197,162);
+        if(!set()) {
+            auto heading=control(L"STATIC",L"Organize os destaques do seu set",0,64,210,720,40);
+            SendMessageW(heading,WM_SETFONT,reinterpret_cast<WPARAM>(titleFont),FALSE);
+            label(L"Um perfil reúne suas regras: qual status observar, quando agir\ne onde mostrar o destaque na tela.",64,276,700,60);
+            if(!workspace.sets.empty()){label(L"Escolha um perfil salvo",64,342,500);setChoices(64,369,500);}
+            else {label(L"Nome do perfil",64,342,500);edit(L"",720,64,369,500);}
+            button(L"Criar perfil",NewSet,64,445,260);
+            theme::styleControl(item(NewSet),theme::Role::Primary);
+        } else {
+        label(L"Perfis salvos",24,136,284);setChoices(24,158,284);
+        label(L"Nome do perfil",326,136,326);edit(set()->name.c_str(),SetName,326,158,326);
+        button(L"Novo perfil",NewSet,670,156,162);button(L"Excluir perfil",DeleteSet,670,197,162);
+        if(set()->rules.empty()) {
+            selectedRule=-1;
+            auto heading=control(L"STATIC",L"Crie a primeira regra deste perfil",0,64,298,720,40);
+            SendMessageW(heading,WM_SETFONT,reinterpret_cast<WPARAM>(titleFont),FALSE);
+            label(L"Quando um status atender à condição escolhida,\na regra mostra um destaque na área que você indicar.",64,350,700,60);
+            label(L"Nome da regra",64,423,500);edit(L"",720,64,450,500);
+            button(L"Criar regra",NewRule,64,502,260);
+            theme::styleControl(item(NewRule),theme::Role::Primary);
+        } else {
         label(L"A primeira regra verdadeira vence se duas usam o mesmo destino.",24,205,628,30);
         label(L"Regras em ordem de prioridade",24,240,238);auto rules=list(RuleList,24,265,238,255);
         if(set())for(const auto& value:set()->rules)add(rules,value.condition.name,true);
@@ -336,16 +390,18 @@ void App::makeUI() {
             const auto sample=std::find_if(rule()->stackSamples.begin(),rule()->stackSamples.end(),[&](const auto& value){return value.value==rule()->condition.stacks;});
             if(sample!=rule()->stackSamples.end())button(L"Excluir amostra",DeleteRuleStack,616,470,216);
         }
-        control(L"BUTTON",L"Aro com previsão de tempo (experimental)",WS_TABSTOP|BS_AUTOCHECKBOX,620,474,212,26,FollowClock);
+        control(L"BUTTON",L"Aro com previsão de tempo (experimental)",WS_TABSTOP|BS_AUTOCHECKBOX,282,502,550,26,FollowClock);
         SendMessageW(item(FollowClock),BM_SETCHECK,rule()&&rule()->followClock?BST_CHECKED:BST_UNCHECKED,0);
-        control(L"STATIC",L"",0,282,505,550,41,RulePhrase);
+        control(L"STATIC",L"",SS_ENDELLIPSIS,282,531,550,20,RulePhrase);
         control(L"STATIC",L"",0,282,588,550,24,ClockHint);
         button(L"Nova regra",NewRule,24,535,112);button(L"Excluir regra",DeleteRule,148,535,114);
         button(L"Subir",MoveRuleUp,24,574,112);button(L"Descer",MoveRuleDown,148,574,114);
-        button(L"Testar destaque por 5 s",TestAction,282,551,256);button(L"Salvar set e regra",Save,556,551,276);
+        button(L"Testar destaque por 5 s",TestAction,282,554,256);
         for(int id:{SetName,DeleteSet,NewRule,Save})EnableWindow(item(id),set()!=nullptr);
         for(int id:{RuleName,Enabled,RuleStatus,SourceArea,ConditionBox,Stacks,EffectBox,TargetArea,Color,SampleColor,CaptureRuleStack,DeleteRuleStack,TestAction,DeleteRule,MoveRuleUp,MoveRuleDown})if(item(id))EnableWindow(item(id),rule()!=nullptr);
         updateRuleChoices();
+        }
+        }
     }
     statusLabel=control(L"STATIC",L"",0,36,627,784,39);theme::styleControl(statusLabel);
     label(L"F8: voltar ao painel / encerrar teste     F9: iniciar ou parar leitura",24,674,808,22);
@@ -356,7 +412,7 @@ void App::rebuildUIWithDraft() {
     RebuildScope rebuild(*this);
     struct Draft {int id;std::wstring value;LRESULT selected;};
     std::vector<Draft> edits,choices;
-    for(int id:{HudName,AreaName,StatusName,SampleValue,SetName,RuleName,Validity})if(item(id))edits.push_back({id,text(item(id)),0});
+    for(int id:std::initializer_list<int>{HudName,AreaName,StatusName,SampleValue,SetName,RuleName,Validity,720})if(item(id))edits.push_back({id,text(item(id)),0});
     for(int id:{RuleStatus,SourceArea,TargetArea,ConditionBox,Stacks,EffectBox,Color})if(item(id))choices.push_back({id,text(item(id)),selection(item(id))});
     const auto enabled=item(Enabled)?SendMessageW(item(Enabled),BM_GETCHECK,0,0):BST_UNCHECKED;
     const auto followClock=item(FollowClock)?SendMessageW(item(FollowClock),BM_GETCHECK,0,0):BST_UNCHECKED;
@@ -394,7 +450,9 @@ aa::Workspace App::editorValues() {
             auto& value=currentSet->rules[static_cast<std::size_t>(selectedRule)];
             value.condition.name=nameFrom(item(RuleName));value.condition.profile=currentSet->name;
             const auto statusIndex=selection(item(RuleStatus));
-            value.statusId=statusIndex>=0&&statusIndex<static_cast<int>(changed.statuses.size())?changed.statuses[static_cast<std::size_t>(statusIndex)].id:L"";
+            const auto statusId=statusIndex>=0&&statusIndex<static_cast<int>(changed.statuses.size())?changed.statuses[static_cast<std::size_t>(statusIndex)].id:L"";
+            if(value.statusId!=statusId){value.stackSamples.clear();value.clockReferencePath.clear();}
+            value.statusId=statusId;
             value.sourceArea=text(item(SourceArea));value.targetArea=text(item(TargetArea));
             value.condition.condition=conditionFrom(selection(item(ConditionBox)));
             if(value.condition.condition==aa::Condition::StacksEqual) {
@@ -468,8 +526,11 @@ void App::command(int id,int notification) {
     if(notification==EN_KILLFOCUS&&(id==HudName||id==AreaName||id==StatusName||id==SetName||id==RuleName||id==Validity)){
         saveEditor();error=L"Alteração salva.";refreshStatus();return;
     }
-    if(id==FollowClock&&notification==BN_CLICKED){updateRuleChoices();return;}
-    if(notification==CBN_SELCHANGE&&(id==RuleStatus||id==ConditionBox||id==Stacks||id==EffectBox||id==Color||id==SourceArea||id==TargetArea)){updateRuleChoices();return;}
+    if((id==FollowClock||id==Enabled)&&notification==BN_CLICKED){updateRuleChoices();saveEditor();error=L"Alteração salva.";refreshStatus();return;}
+    if(notification==CBN_SELCHANGE&&(id==RuleStatus||id==ConditionBox||id==Stacks||id==EffectBox||id==Color||id==SourceArea||id==TargetArea)){
+        updateRuleChoices();saveEditor();error=L"Alteração salva.";
+        if(id==ConditionBox||id==RuleStatus)makeUI();else refreshStatus();return;
+    }
     const bool navigation=(notification==CBN_SELCHANGE&&(id==HudList||id==SetList))||
         (notification==LBN_SELCHANGE&&(id==StatusList||id==AreaList||id==RuleList));
     if(navigation) {
@@ -521,19 +582,12 @@ void App::command(int id,int notification) {
     if(!action)return;
     std::optional<std::wstring> newName;
     if(createsItem(id)){
+        const bool inlineName=item(720)&&((id==NewHud&&workspace.huds.empty())||(id==NewArea&&hud()&&hud()->areas.empty())||
+            (id==NewStatus&&workspace.statuses.empty())||(id==NewSet&&workspace.sets.empty())||(id==NewRule&&set()&&set()->rules.empty()));
+        if(inlineName){newName=nameFrom(item(720));validateNewName(*this,id,*newName);}
+        else newName=requestName(*this,id);
+        if(!newName)return;
         saveEditor();
-        if(id==NewHud)newName=uniqueName(workspace.huds,L"Nova HUD");
-        else if(id==NewStatus)newName=uniqueName(workspace.statuses,L"Novo status");
-        else if(id==NewSet)newName=uniqueName(workspace.sets,L"Novo perfil");
-        else if(id==NewArea){
-            auto* activeHud=hud();if(!activeHud)throw std::runtime_error("Crie uma HUD antes de adicionar áreas.");
-            newName=uniqueName(activeHud->areas,L"Nova área");
-        }else if(id==NewRule){
-            auto* activeSet=set();if(!activeSet)throw std::runtime_error("Crie um perfil antes de adicionar regras.");
-            auto candidate=std::wstring(L"Nova regra");unsigned suffix=2;
-            while(std::any_of(activeSet->rules.begin(),activeSet->rules.end(),[&](const auto& rule){return aa::sameName(rule.condition.name,candidate);}))candidate=L"Nova regra "+std::to_wstring(suffix++);
-            newName=std::move(candidate);
-        }
     }else saveEditor();
     auto changed=workspace;stop();
     auto currentHud=byId(changed.huds,changed.activeHudId);auto currentSet=byId(changed.sets,changed.activeSetId);
@@ -543,7 +597,7 @@ void App::command(int id,int notification) {
     case NewHud: {
         if(changed.huds.size()>=64)throw std::runtime_error("O limite é de 64 HUDs. Exclua uma HUD para criar outra.");
         aa::HudLayout value;value.id=aa::newId(changed);value.name=*newName;changed.activeHudId=value.id;
-        changed.huds.push_back(std::move(value));selectedArea=-1;focus=HudName;error=L"HUD criada. Dê um nome e adicione as áreas necessárias.";break;
+        changed.huds.push_back(std::move(value));selectedArea=-1;focus=720;error=L"HUD criada. Adicione as áreas necessárias.";break;
     }
     case DeleteHud:
         if(!currentHud)return;
@@ -553,7 +607,7 @@ void App::command(int id,int notification) {
         if(!currentHud)throw std::runtime_error("Crie uma HUD antes de adicionar áreas.");
         if(currentHud->areas.size()>=32)throw std::runtime_error("O limite é de 32 áreas por HUD.");
         currentHud->areas.push_back({*newName,{},48,false});selectedArea=static_cast<int>(currentHud->areas.size())-1;
-        focus=AreaName;error=L"Área criada. Dê um nome e selecione sua posição no jogo.";break;
+        focus=SelectArea;error=L"Área criada. Selecione sua posição no jogo.";break;
     case DeleteArea:
         if(!currentHud||!area())return;
         currentHud->areas.erase(currentHud->areas.begin()+selectedArea);selectedArea=-1;
@@ -581,7 +635,7 @@ void App::command(int id,int notification) {
         if(changed.statuses.size()>=64)throw std::runtime_error("O limite é de 64 status. Exclua um status sem regras para criar outro.");
         aa::StatusDefinition value;value.id=aa::newId(changed);value.name=id==AddPreset?uniqueName(changed.statuses,L"Espírito Assassino"):*newName;value.builtinAssassin=id==AddPreset;
         selectedStatusId=value.id;changed.statuses.push_back(std::move(value));focus=StatusName;
-        error=id==AddPreset?L"Exemplo adicionado à biblioteca com amostras de 2 e 3 stacks.":L"Status criado. Dê um nome e capture a imagem de referência.";break;
+        error=id==AddPreset?L"Exemplo adicionado à biblioteca com amostras de 2 e 3 stacks.":L"Status criado. Capture a imagem de referência.";break;
     }
     case DeleteStatus:
         if(!status)return;aa::eraseStatus(changed,status->id);selectedStatusId.clear();error=L"Status excluído da biblioteca.";break;
@@ -642,7 +696,7 @@ void App::command(int id,int notification) {
     case NewSet: {
         if(changed.sets.size()>=64)throw std::runtime_error("O limite é de 64 sets. Exclua um set para criar outro.");
         aa::SetProfile value;value.id=aa::newId(changed);value.name=*newName;changed.activeSetId=value.id;
-        changed.sets.push_back(std::move(value));selectedRule=-1;focus=SetName;error=L"Perfil criado. Dê um nome e adicione uma regra.";break;
+        changed.sets.push_back(std::move(value));selectedRule=-1;focus=720;error=L"Perfil criado. Adicione uma regra.";break;
     }
     case DeleteSet:
         if(!currentSet)return;
@@ -748,9 +802,9 @@ void App::paint() {
     theme::frame(dc,{px(12),px(128),px(848),px(613)},RGB(39,44,53));
     theme::frame(dc,{px(24),px(619),px(832),px(668)},RGB(54,48,49));
     theme::fill(dc,{px(24),px(619),px(27),px(668)},theme::Accent);
-    if(page==0||page==2) {
-        const auto& preview=page==0?capturePreview:referencePreview;
-        const RECT bounds=page==0?RECT{px(24),px(486),px(832),px(602)}:RECT{px(282),px(330),px(544),px(481)};
+    if(page==3||(page==1&&selectedStatus())) {
+        const auto& preview=page==3?capturePreview:referencePreview;
+        const RECT bounds=page==3?RECT{px(24),px(486),px(832),px(602)}:RECT{px(282),px(330),px(544),px(481)};
         theme::fill(dc,bounds,theme::Field);theme::frame(dc,bounds,theme::Border);
         if(preview.valid()) {
             const auto factor=std::min(static_cast<double>(bounds.right-bounds.left)/preview.width,static_cast<double>(bounds.bottom-bounds.top)/preview.height);
@@ -760,7 +814,7 @@ void App::paint() {
             SetStretchBltMode(dc,COLORONCOLOR);StretchDIBits(dc,bounds.left+(bounds.right-bounds.left-width)/2,bounds.top+(bounds.bottom-bounds.top-height)/2,width,height,0,0,preview.width,preview.height,preview.bgra.data(),&info,DIB_RGB_COLORS,SRCCOPY);
         } else {
             SetBkMode(dc,TRANSPARENT);SetTextColor(dc,theme::Muted);SelectObject(dc,font);auto message=bounds;
-            DrawTextW(dc,page==0?(running?L"Aguardando a primeira captura do jogo...":L"Sem captura. Inicie a leitura após resolver as pendências."):L"Cadastre uma imagem de referência.",-1,&message,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+            DrawTextW(dc,page==3?(running?L"Aguardando a primeira captura do jogo...":L"Sem captura. Inicie a leitura após resolver as pendências."):L"Cadastre uma imagem de referência.",-1,&message,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
         }
     }
     RestoreDC(dc,saved);

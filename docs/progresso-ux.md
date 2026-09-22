@@ -6,8 +6,8 @@ Atualizado em 22/09/2026.
 |---|---|---|
 | Separar stacks e relógio por regra | Concluída | Commit `5ad65cf`; 15/15 testes passaram. |
 | Ordem das abas: HUDs → Status → Perfis e regras → Monitorar | Concluída | Commit `5a5c4cd`; 15/15 testes passaram. |
-| Criação direta e salvamento automático | Em execução | Próximo teste: criar HUD, área, status, perfil e regra sem diálogo nem segundo clique. |
-| Estados vazios e orientação de pendências | Pendente | Depende do cadastro direto. |
+| Nome antes de criar e edição automática | Concluída neste fluxo | Usuário revisou o fluxo: primeiro nome inline; itens adicionais com Criar/Cancelar. 15/15 testes e teste manual de HUD. |
+| Estados vazios dos cadastros | Concluída | HUDs, áreas, status, perfis e regras orientam criação; pendências do Monitorar ainda faltam. |
 | Editor Quando → Então → Testar | Pendente | Inclui capturar, substituir e excluir amostras por regra. |
 | Monitorar com botão Resolver | Pendente | Depende de pendências estruturadas na interface. |
 | Revisão visual e teste funcional no jogo | Pendente | Executar somente após a interface estar completa. |

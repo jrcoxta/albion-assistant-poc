@@ -33,10 +33,32 @@ void tab(App& app,int page){const int physical[]={3,0,1,2};app.command(Tab0+phys
 void choose(App& app,int id,int index,bool list=false){SendMessageW(app.item(id),list?LB_SETCURSEL:CB_SETCURSEL,index,0);app.command(id,list?LBN_SELCHANGE:CBN_SELCHANGE);}
 bool shows(App& app,const wchar_t* phrase){return std::any_of(app.controls.begin(),app.controls.end(),[&](HWND control){return text(control).find(phrase)!=std::wstring::npos;});}
 void createNamed(App& app,int command,const wchar_t* name,bool cancel=false,bool invalid=false){
-    if(cancel||invalid)return;
-    app.command(command,BN_CLICKED);
-    const int field=command==NewHud?HudName:command==NewArea?AreaName:command==NewStatus?StatusName:command==NewSet?SetName:RuleName;
-    SetWindowTextW(app.item(field),name);app.command(field,EN_KILLFOCUS);
+    const bool inlineName=(command==NewHud&&app.workspace.huds.empty())||(command==NewArea&&app.hud()&&app.hud()->areas.empty())||
+        (command==NewStatus&&app.workspace.statuses.empty())||(command==NewSet&&app.workspace.sets.empty())||(command==NewRule&&app.set()&&app.set()->rules.empty());
+    if(auto field=inlineName?app.item(720):nullptr){
+        SetWindowTextW(field,name);
+        if(cancel)return;
+        if(invalid){bool rejected=false;try{app.command(command,BN_CLICKED);}catch(const std::exception&){rejected=true;}require(rejected,"nome inválido aceito");return;}
+        app.command(command,BN_CLICKED);return;
+    }
+    const DWORD ownerThread=GetCurrentThreadId();std::atomic<bool> answered=false;
+    std::thread responder([&]{
+        const auto deadline=GetTickCount64()+2000;
+        while(GetTickCount64()<deadline&&!answered){
+            struct Context{HWND owner;const wchar_t* name;bool cancel,invalid,handled=false;} context{app.window,name,cancel,invalid};
+            EnumThreadWindows(ownerThread,[](HWND dialog,LPARAM lp)->BOOL{
+                auto& c=*reinterpret_cast<Context*>(lp);
+                if(GetWindow(dialog,GW_OWNER)!=c.owner||!GetDlgItem(dialog,710))return TRUE;
+                SetDlgItemTextW(dialog,710,c.name);
+                SendMessageW(dialog,WM_COMMAND,c.cancel?IDCANCEL:IDOK,0);
+                if(c.invalid&&IsWindow(dialog))SendMessageW(dialog,WM_COMMAND,IDCANCEL,0);
+                c.handled=true;return FALSE;
+            },reinterpret_cast<LPARAM>(&context));
+            if(context.handled){answered=true;break;}Sleep(10);
+        }
+    });
+    try{app.command(command,BN_CLICKED);}catch(...){responder.join();throw;}
+    responder.join();require(answered,"cadastro deve pedir nome antes de criar");
 }
 void confirmDeleteHud(App& app,int answer){
     // Responde exclusivamente ao diálogo pertencente a esta janela/processo de teste.
@@ -98,6 +120,29 @@ int wmain(int argc,wchar_t** argv){
         require(app.window&&app.target,"janelas de teste não criadas");app.makeUI();
         require(app.item(NewHud)!=nullptr&&!app.item(Start),"abertura deve começar no cadastro de HUDs, não no monitor");
         require(!IsWindowVisible(app.window)&&!app.rebuilding,"construção mostrou janela originalmente oculta ou deixou bloqueio ativo");
+        {
+            app.commit({});app.makeUI();
+            require(app.item(NewHud)&&!app.item(HudName)&&!app.item(AreaList),"primeiro uso deve mostrar somente orientação e criação da HUD");
+            require(app.item(720)!=nullptr,"primeira HUD precisa aceitar nome antes de criar");
+            SetWindowTextW(app.item(720),L"Nome em edição");app.rebuildUIWithDraft();
+            require(text(app.item(720))==L"Nome em edição","reconstrução apagou nome do novo cadastro");
+            createNamed(app,NewHud,L"Minha tela");
+            require(app.hud()&&app.hud()->name==L"Minha tela"&&app.item(NewArea)&&!app.item(AreaName),"HUD sem áreas deve oferecer criação sem editor vazio");
+            createNamed(app,NewArea,L"E");
+            require(app.area()&&app.area()->name==L"E"&&app.item(SelectArea)&&!app.item(Save),"área deve ser editável e salva automaticamente");
+            require(aa::loadWorkspace(app.workspacePath,{}).huds.front().areas.front().name==L"E","criação direta não persistiu a área");
+            tab(app,2);
+            require(app.item(NewStatus)&&!app.item(StatusName)&&!app.item(CaptureStatus),"biblioteca vazia não deve exibir editor desabilitado");
+            createNamed(app,NewStatus,L"Meu status");
+            require(app.item(CaptureStatus)&&!app.item(Save),"status deve permitir captura com edição automática");
+            tab(app,3);
+            require(app.item(NewSet)&&!app.item(RuleName),"perfis vazios não devem exibir editor de regra");
+            createNamed(app,NewSet,L"Meu perfil");
+            require(app.item(NewRule)&&!app.item(RuleName),"perfil vazio deve orientar criação da primeira regra");
+            createNamed(app,NewRule,L"Meu destaque");
+            require(app.item(RuleName)&&!app.item(Save),"regra deve abrir para edição automática");
+            app.commit(w);app.selectedArea=-1;app.selectedRule=-1;app.selectedStatusId=L"s1";app.page=0;app.makeUI();
+        }
         {
             tab(app,0);const auto start=app.item(Start);const auto source=app.source;
             app.running=true;choose(app,HudList,0);choose(app,SetList,0);
@@ -438,6 +483,7 @@ int wmain(int argc,wchar_t** argv){
         tab(app,1);createNamed(app,NewHud,L"Outra tela");require(app.hud()->areas.empty()&&app.hud()->clientWidth==0&&app.workspace.statuses.size()==2&&app.set()->rules.size()==2,"nova HUD copiou tela ou alterou biblioteca/set");
         const auto created=app.workspace.activeHudId;confirmDeleteHud(app,IDNO);require(app.workspace.activeHudId==created&&app.workspace.huds.size()==3,"cancelamento excluiu HUD");
         confirmDeleteHud(app,IDYES);require(app.workspace.huds.size()==2&&app.workspace.activeHudId!=created&&app.workspace.statuses.size()==2&&app.set()->rules.size()==2,"excluir HUD alterou biblioteca/set");
+        require(app.item(HudList)!=nullptr,"HUDs restantes precisam continuar acessíveis após excluir a ativa");
         choose(app,HudList,0);tab(app,3);app.selectedRule=0;app.makeUI();
         const auto screen=screenOf(app.target);app.hud()->monitorDpi=screen.dpi;app.hud()->monitorDevice=screen.device;
         app.hud()->areas[1].region.shape=aa::RegionShape::Circle;
