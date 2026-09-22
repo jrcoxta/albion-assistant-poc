@@ -89,6 +89,7 @@ int wmain(int argc,wchar_t** argv){
         w.statuses={{L"s1",L"Espírito Assassino",false,true,{},{}},{L"s2",L"Veneno",true,false,{},{}}};
         aa::StatusRule rule;rule.id=L"r1";rule.statusId=L"s1";rule.sourceArea=L"Meus status";rule.targetArea=L"Habilidade E";
         rule.condition.name=L"Preparar golpe";rule.condition.condition=aa::Condition::StacksEqual;rule.condition.stacks=3;
+        rule.stackSamples={{3,app.storeImage(L"r1",aa::loadImageResource(IDR_ASSASSIN_3))}};
         w.sets={{L"set1",L"Adagas",{rule}},{L"set2",L"Cajado",{}}};w.activeSetId=L"set1";
         app.commit(w);app.selectedStatusId=L"s1";
         WNDCLASSW cls{};cls.hInstance=app.instance;cls.lpfnWndProc=testProc;cls.lpszClassName=L"AlbionAppFlowTests";cls.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_BTNFACE+1);RegisterClassW(&cls);
@@ -361,10 +362,10 @@ int wmain(int argc,wchar_t** argv){
         bool blocked=false;try{app.command(DeleteStatus,BN_CLICKED);}catch(const std::invalid_argument&){blocked=true;}require(blocked&&app.workspace.statuses.size()==2,"exclusão removeu status usado");
         app.error.clear();
         auto custom=app.workspace;custom.statuses[1].referencePath=app.storeImage(L"s2",aa::loadImageResource(IDR_ASSASSIN_NONE));
-        custom.statuses[1].stacks={{5,app.storeImage(L"s2",aa::loadImageResource(IDR_ASSASSIN_3))}};
+        const auto five=app.storeImage(L"s2",aa::loadImageResource(IDR_ASSASSIN_3));
+        for(auto& profile:custom.sets)for(auto& configured:profile.rules)if(configured.statusId==L"s2")configured.stackSamples={{5,five}};
         app.commit(custom);app.makeUI();screenshot(app,pictures,L"ui-status.png");
         auto presenceReader=aa::MonitorReader{app.workspace.statuses[1],app.hud()->areas[0],false};
-        presenceReader.status.stacks[0].path=L"Z:\\amostra-ausente-de-teste.png";
         const auto presenceOnly=makeRecognizer(presenceReader);
         const auto reference=aa::loadImageResource(IDR_ASSASSIN_NONE);
         require(presenceOnly->recognize(reference,reference.width).presence==aa::Presence::Present,"presença exigiu amostra de stacks ausente");
@@ -398,7 +399,7 @@ int wmain(int argc,wchar_t** argv){
             app.makeUI();screenshot(app,pictures,L"ui-status-relogio.png");
             app.commit(before);app.makeUI();
         }
-        presenceReader.needsStacks=true;blocked=false;
+        presenceReader.status.stacks={{5,L"Z:\\amostra-ausente-de-teste.png"}};presenceReader.needsStacks=true;blocked=false;
         try{(void)makeRecognizer(presenceReader);}catch(const std::exception&){blocked=true;}require(blocked,"contador sem amostra iniciou");
         presenceReader.needsStacks=false;presenceReader.status.referencePath=(app.directory/L"oversized.png").wstring();
         aa::saveImage({512,512,std::vector<std::uint8_t>(512*512*4,30)},presenceReader.status.referencePath);

@@ -333,6 +333,8 @@ void App::makeUI() {
         if(rule()&&rule()->condition.condition==aa::Condition::StacksEqual) {
             label(L"Nova amostra",282,474,94);edit(std::to_wstring(rule()->condition.stacks).c_str(),SampleValue,378,472,58);
             button(L"Capturar amostra",CaptureRuleStack,446,470,160);
+            const auto sample=std::find_if(rule()->stackSamples.begin(),rule()->stackSamples.end(),[&](const auto& value){return value.value==rule()->condition.stacks;});
+            if(sample!=rule()->stackSamples.end())button(L"Excluir amostra",DeleteRuleStack,616,470,216);
         }
         control(L"BUTTON",L"Aro com previsão de tempo (experimental)",WS_TABSTOP|BS_AUTOCHECKBOX,620,474,212,26,FollowClock);
         SendMessageW(item(FollowClock),BM_SETCHECK,rule()&&rule()->followClock?BST_CHECKED:BST_UNCHECKED,0);
@@ -342,7 +344,7 @@ void App::makeUI() {
         button(L"Subir",MoveRuleUp,24,574,112);button(L"Descer",MoveRuleDown,148,574,114);
         button(L"Testar destaque por 5 s",TestAction,282,551,256);button(L"Salvar set e regra",Save,556,551,276);
         for(int id:{SetName,DeleteSet,NewRule,Save})EnableWindow(item(id),set()!=nullptr);
-        for(int id:{RuleName,Enabled,RuleStatus,SourceArea,ConditionBox,Stacks,EffectBox,TargetArea,Color,SampleColor,CaptureRuleStack,TestAction,DeleteRule,MoveRuleUp,MoveRuleDown})EnableWindow(item(id),rule()!=nullptr);
+        for(int id:{RuleName,Enabled,RuleStatus,SourceArea,ConditionBox,Stacks,EffectBox,TargetArea,Color,SampleColor,CaptureRuleStack,DeleteRuleStack,TestAction,DeleteRule,MoveRuleUp,MoveRuleDown})if(item(id))EnableWindow(item(id),rule()!=nullptr);
         updateRuleChoices();
     }
     statusLabel=control(L"STATIC",L"",0,36,627,784,39);theme::styleControl(statusLabel);
@@ -396,8 +398,8 @@ aa::Workspace App::editorValues() {
             value.sourceArea=text(item(SourceArea));value.targetArea=text(item(TargetArea));
             value.condition.condition=conditionFrom(selection(item(ConditionBox)));
             if(value.condition.condition==aa::Condition::StacksEqual) {
-                const auto row=selection(item(Stacks));const auto status=byId(changed.statuses,value.statusId);
-                const auto allowed=status?aa::stackValues(*status):std::vector<unsigned>{};
+                const auto row=selection(item(Stacks));
+                std::vector<unsigned> allowed;for(const auto& sample:value.stackSamples)allowed.push_back(sample.value);
                 const auto stacks=row<0?0U:static_cast<unsigned>(SendMessageW(item(Stacks),CB_GETITEMDATA,row,0));
                 // Rascunhos sem amostra continuam editáveis; a preparação do monitor explica o bloqueio.
                 if(std::find(allowed.begin(),allowed.end(),stacks)!=allowed.end())value.condition.stacks=stacks;
@@ -422,7 +424,8 @@ void App::updateRuleChoices() {
     unsigned selected=old>=0?static_cast<unsigned>(SendMessageW(stackControl,CB_GETITEMDATA,old,0)):rule()?rule()->condition.stacks:0;
     const auto statusIndex=selection(item(RuleStatus));
     const auto status=statusIndex>=0&&statusIndex<static_cast<int>(workspace.statuses.size())?&workspace.statuses[static_cast<std::size_t>(statusIndex)]:nullptr;
-    const auto values=status?aa::stackValues(*status):std::vector<unsigned>{};
+    std::vector<unsigned> values;if(rule()&&status&&rule()->statusId==status->id)for(const auto& sample:rule()->stackSamples)values.push_back(sample.value);
+    std::sort(values.begin(),values.end());values.erase(std::unique(values.begin(),values.end()),values.end());
     SendMessageW(stackControl,CB_RESETCONTENT,0,0);int active=-1;
     for(auto value:values){auto row=add(stackControl,std::to_wstring(value));SendMessageW(stackControl,CB_SETITEMDATA,row,value);if(value==selected)active=row;}
     choose(stackControl,active);
@@ -514,7 +517,7 @@ void App::command(int id,int notification) {
         makeUI();return;
     }
     const bool action=id==NewHud||id==DeleteHud||id==NewArea||id==DeleteArea||id==SelectArea||id==CalibrateArea||id==NewStatus||id==DeleteStatus||
-        id==CaptureStatus||id==ImportStatus||id==CaptureStack||id==CaptureRuleStack||id==DeleteStack||id==AddPreset||id==NewSet||id==DeleteSet||id==NewRule||id==DeleteRule||id==MoveRuleUp||id==MoveRuleDown;
+        id==CaptureStatus||id==ImportStatus||id==CaptureStack||id==CaptureRuleStack||id==DeleteRuleStack||id==DeleteStack||id==AddPreset||id==NewSet||id==DeleteSet||id==NewRule||id==DeleteRule||id==MoveRuleUp||id==MoveRuleDown;
     if(!action)return;
     std::optional<std::wstring> newName;
     if(createsItem(id)){
@@ -618,9 +621,16 @@ void App::command(int id,int notification) {
         aa::Recognizer validator;
         if(!validator.setStackReference(value,chosen->image))throw std::runtime_error("Não identifiquei um contador branco legível no canto inferior direito. Capture o ícone inteiro enquanto o número estiver visível.");
         const auto path=storeImage(ruleStatus->id,chosen->image);
-        auto found=std::find_if(ruleStatus->stacks.begin(),ruleStatus->stacks.end(),[&](const auto& entry){return entry.value==value;});
-        if(found==ruleStatus->stacks.end())ruleStatus->stacks.push_back({value,path});else found->path=path;
+        auto found=std::find_if(currentRule.stackSamples.begin(),currentRule.stackSamples.end(),[&](const auto& entry){return entry.value==value;});
+        if(found==currentRule.stackSamples.end())currentRule.stackSamples.push_back({value,path});else found->path=path;
         currentRule.condition.stacks=value;error=L"Amostra de "+std::to_wstring(value)+L" stacks salva.";break;
+    }
+    case DeleteRuleStack: {
+        if(!currentSet||selectedRule<0||selectedRule>=static_cast<int>(currentSet->rules.size()))throw std::runtime_error("Escolha uma regra primeiro.");
+        auto& currentRule=currentSet->rules[static_cast<std::size_t>(selectedRule)];
+        const auto value=currentRule.condition.stacks;
+        std::erase_if(currentRule.stackSamples,[&](const auto& sample){return sample.value==value;});
+        error=L"Amostra de "+std::to_wstring(value)+L" stacks excluída. A regra ficará pendente até receber outra captura.";break;
     }
     case DeleteStack: {
         if(!status)return;const auto row=selection(item(StackList),true);if(row<0)throw std::runtime_error("Escolha a amostra de stacks para excluir.");
