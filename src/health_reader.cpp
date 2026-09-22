@@ -89,9 +89,8 @@ std::optional<float> readHealthFraction(const Image& image, const HealthCalibrat
                 continue;
             }
             if (runStart < 0) continue;
-            const int runLength = x - runStart;
-            if (rightmost < calibration.x ? runStart <= calibration.x + calibration.width / 8 :
-                runStart - rightmost - 1 <= calibration.width / 3 || runLength >= calibration.width / 10)
+            if (rightmost < calibration.x ? runStart <= calibration.x + std::max(2, calibration.width / 40) :
+                runStart - rightmost - 1 <= calibration.width / 3)
                 rightmost = x - 1;
             runStart = -1;
         }

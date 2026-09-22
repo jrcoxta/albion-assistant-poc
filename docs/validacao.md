@@ -1,5 +1,15 @@
 # Validação do Albion Assistant
 
+## Pulso dourado e leitura de vida sem alvo — 22/09/2026
+
+Base Git `b9895c6`. O usuário confirmou que a condição de vida funciona, observou alguns destaques breves sem alvo selecionado e pediu um dourado mais vivo sobre a habilidade. Critérios: manter ícone, cor manual, aro e formas legíveis; rejeitar vermelho solto fora do início da barra; preservar leitura de vida baixa e com texto; publicar um único EXE.
+
+- **APROVADO — efeito visual em prévia:** o contorno e a aura de Brilho/Pulso têm mais contraste; o Pulso suave conserva pelo menos 205/255 de opacidade global. A prancha `build/release/overlay-preview/overlay-gold.png` usa o renderizador real com dourado `RGB(255,191,0)` em retângulo e círculo. A habilidade segue legível; a prancha é ilustrativa e não substitui o jogo.
+- **APROVADO — mitigação verificável:** um trecho vermelho isolado que começa afastado da borda esquerda calibrada não vira vida baixa; um trecho distante não infla a leitura. Os testes falharam antes da correção e passaram depois, incluindo 5% de vida e texto sobre a barra. A validade global de 750 ms para buffs não foi alterada.
+- **APROVADO — testes e publicação:** build canônico Release passou 16/16 suítes; `app_flow` terminou em 28,26 s e seu limite de execução foi ajustado de 30 para 60 s após ultrapassar 30 s em uma execução isolada bem-sucedida. `dist` contém somente `AlbionAssistant.exe` (835.072 bytes), SHA-256 `336D5448C37D327380A62EAA77D54F281604CF791CA12552C9A0C6E6A592A11C`, igual ao binário testado e ao relatório `build/logs/Release-validation.json`.
+- **APROVADO — revisão independente do visual e entrega:** `/root/overlay_final_product` aprovou a prévia dourada e a legibilidade; `/root/overlay_final_qa` conferiu o diff, a prévia, 16/16 testes, o único EXE e os hashes. Nenhum achado P0/P1 na revisão.
+- **PENDENTE — flash no jogo (P2):** a rejeição de vermelho solto foi demonstrada com imagens sintéticas, mas ainda não há captura do quadro que causou o flash relatado. Uma última leitura pode permanecer válida por até 750 ms se não chegar novo quadro. Os revisores não consideram a ausência de flashes comprovada. Conferir com o jogo em primeiro plano, alternando entre alvo selecionado e nenhum alvo, e comparar a linha de percentual no Monitor com o destaque sobre D.
+
 ## Falha na regra de vida sobre o inimigo — 22/09/2026
 
 O usuário confirmou que a leitura estava em execução quando a vida do inimigo chegou a `358/835` (42,9%) e a regra **D-ABERTO**, configurada para `≤49%`, não destacou o D. A captura posterior do painel mostra “Leitura parada” porque ele a interrompeu para fotografar; esse estado não explica a falha. A regra está configurada com efeito **Pulso**, não **Borda**.

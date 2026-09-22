@@ -28,7 +28,7 @@ int main(){
     try{
         const auto calibration=aa::calibrateHealth(healthImage(1.f,true));
         require(calibration.valid(),"calibracao da barra cheia falhou");
-        for(const auto [input,expected]:{std::pair{.48f,.48f},std::pair{.49f,.49f},std::pair{.50f,.50f},std::pair{1.f,1.f}}){
+        for(const auto [input,expected]:{std::pair{.05f,.05f},std::pair{.48f,.48f},std::pair{.49f,.49f},std::pair{.50f,.50f},std::pair{1.f,1.f}}){
             const auto result=aa::readHealthFraction(healthImage(input,true),calibration);
             require(result&&near(*result,expected),"percentual de vida incorreto");
         }
@@ -62,6 +62,18 @@ int main(){
         require(artifactReading&&near(*artifactReading,.43f),"artefato vermelho distante inflou o percentual de vida");
         auto blank=healthImage(0.f,false,true);
         require(!aa::readHealthFraction(blank,withHeader),"barra ausente foi tratada como vida zero");
+        for(int y=14;y<28;++y)for(int x=36;x<66;++x){
+            auto* pixel=blank.bgra.data()+(std::size_t(y)*blank.width+x)*4;
+            pixel[0]=28;pixel[1]=42;pixel[2]=190;
+        }
+        require(!aa::readHealthFraction(blank,withHeader),"vermelho solto sem barra ativou vida baixa");
+        auto distant=healthImage(.43f,false,true);
+        for(int y=14;y<28;++y)for(int x=180;x<212;++x){
+            auto* pixel=distant.bgra.data()+(std::size_t(y)*distant.width+x)*4;
+            pixel[0]=28;pixel[1]=42;pixel[2]=190;
+        }
+        const auto distantReading=aa::readHealthFraction(distant,withHeader);
+        require(distantReading&&near(*distantReading,.43f),"trecho vermelho distante inflou a vida");
         const aa::HealthCalibration oldHeader{8,2,224,3,176,128,97};
         require(!oldHeader.valid(),"calibracao antiga do cabecalho continua valida");
         std::cout<<"Leitura de barra calibrada aprovada\n";

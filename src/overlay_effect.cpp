@@ -49,8 +49,8 @@ Image renderOverlayEffect(int iconWidth, int iconHeight, OverlayEffect effect, s
         } else {
             // Gradiente contínuo dentro/fora, com centro levemente colorido e pico translúcido.
             const double outside = std::max(distance, 0.0);
-            intensity = 0.40 * std::exp(-0.5 * distance * distance / (5.5 * 5.5)) +
-                        0.08 * std::exp(-0.5 * distance * distance / (8.0 * 8.0)) +
+            intensity = 0.60 * std::exp(-0.5 * distance * distance / (5.5 * 5.5)) +
+                        0.11 * std::exp(-0.5 * distance * distance / (8.0 * 8.0)) +
                         0.06 * std::exp(-0.5 * outside * outside / (8.0 * 8.0));
         }
         const unsigned alpha = static_cast<unsigned>(std::lround(std::clamp(intensity, 0.0, 1.0) * 255));
@@ -94,7 +94,7 @@ Image renderOverlayEffect(int iconWidth, int iconHeight, OverlayEffect effect, s
 std::uint8_t overlayEffectOpacity(OverlayEffect effect, std::uint64_t elapsedMs) {
     if (effect != OverlayEffect::Pulse) return 255;
     const double phase = (elapsedMs % 1500) * (2.0 * std::numbers::pi / 1500.0);
-    return static_cast<std::uint8_t>(std::lround(207.5 + 47.5 * std::cos(phase)));
+    return static_cast<std::uint8_t>(std::lround(230.0 + 25.0 * std::cos(phase)));
 }
 
 std::optional<std::uint32_t> skillAccentColor(const Image& image) {
