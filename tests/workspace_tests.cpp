@@ -174,6 +174,22 @@ void roundtripAndIsolation() {
 void shapeCompatibility() {
     TemporaryDirectory directory;
     const auto file = directory.path / L"workspace.ini";
+    {
+        aa::HudArea area{L"Vida",{10,20,240,50},48,true,{8,4,180,5,190,42,28}};
+        area.replaceRegion({30,40,200,48});
+        check(!area.healthCalibration.valid()&&!area.iconCalibrated,
+              "mover a area preservou calibracoes da posicao anterior");
+    }
+    {
+        auto changed=populated(directory.path);
+        auto& area=changed.huds[0].areas[0];
+        area.healthCalibration={8,4,180,5,190,42,28};
+        area.replaceRegion({30,40,200,48});
+        aa::saveWorkspace(file,changed);
+        const auto restored=aa::loadWorkspace(file,{});
+        check(!restored.huds[0].areas[0].healthCalibration.valid()&&!restored.huds[0].areas[0].iconCalibrated,
+              "reabrir a HUD restaurou calibrações de uma região antiga");
+    }
     aa::saveWorkspace(file, populated(directory.path));
     ini(file, L"hud.0.area.1", L"shape", L"1");
     const auto loaded = aa::loadWorkspace(file, {});

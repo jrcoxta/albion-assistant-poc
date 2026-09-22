@@ -1,5 +1,14 @@
 # Validação do Albion Assistant
 
+## Calibração de vida acessível na HUD — 22/09/2026
+
+O botão **Calibrar vida cheia** só era criado quando uma regra de Vida já apontava para a área. Isso impedia preparar uma área nova antes da regra, como ocorreu na HUD Monitor 34. Agora o botão aparece para qualquer área da HUD e fica habilitado somente após selecionar uma região retangular. Reposicionar a região invalida as medições anteriores de ícone e vida; uma área de vida calibrada também recebe uma descrição própria mesmo sem regra.
+
+- **APROVADO — regressão e publicação:** o teste de interface reproduziu a ausência do botão antes da correção; o teste de workspace confirmou que a invalidação permanece após salvar e reabrir. Build canônico Release com 16/16 suítes aprovadas; único `dist/AlbionAssistant.exe` publicado e conferido, SHA-256 `CB6CD926879B29614BECADFFB92C989F15B05874808868D3F0BB80681A32F01C`.
+- **APROVADO — aparência estática:** `build/ux-health-button-20260922/ui-hud-sem-regra.png` mostra o botão na área retangular sem regra, alinhado aos outros controles. Isso não substitui a conferência da captura no jogo.
+- **APROVADO — revisão independente:** `/root/health_button_review` examinou o diff a partir de `498e167`. Apontou texto confuso e falta de teste da persistência após reposicionar; ambos foram corrigidos e reconferidos sem pendências. O revisor não executou build para não disputar os logs; os testes e a publicação foram executados pelo coordenador.
+- **PENDENTE — jogo real:** capturar a barra cheia do personagem e confirmar uma leitura parcial no Albion. O teste automatizado valida a disponibilidade do botão e o leitor sintético, sem afirmar precisão em combate.
+
 ## Condição por porcentagem de vida — 22/09/2026
 
 Uma regra agora aceita condição de **Status** ou **Vida**. Na condição de vida, a área da HUD é calibrada com a barra cheia; o aplicativo identifica a faixa vermelha e mede seu preenchimento atual da esquerda para a direita. A leitura incerta não ativa o destaque. Limites usam histerese de 2 pontos: `≤49%` só libera acima de 51%; `≥49%` só libera abaixo de 47%.

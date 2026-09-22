@@ -292,6 +292,8 @@ int wmain(int argc,wchar_t** argv){
             screenshot(app,pictures,L"ui-hud-destino.png");
             app.area()->region.shape=aa::RegionShape::Circle;app.makeUI();
             require(shows(app,L"Área circular salva")&&!app.item(CalibrateArea),"destino circular perdeu forma na interface ou exigiu medição");
+            require(app.item(CalibrateHealth)&&!IsWindowEnabled(app.item(CalibrateHealth)),
+                    "área circular ofereceu calibração de barra horizontal");
             app.saveEditor();require(aa::loadWorkspace(app.workspacePath,{}).huds[1].areas[1].region.shape==aa::RegionShape::Circle,
                 "interface não preservou formato da área");
             screenshot(app,pictures,L"ui-hud-circulo.png");
@@ -300,9 +302,17 @@ int wmain(int argc,wchar_t** argv){
             require(!app.item(CalibrateArea)&&!shows(app,L"57 px"),"destino mostra medição de ícone sem uso");
             choose(app,AreaList,2,true);
             require(app.item(CalibrateArea)&&shows(app,L"opcional")&&!shows(app,L"pendente"),"área Q sem regra apresenta medição como pendência");
+            require(app.item(CalibrateHealth)&&IsWindowEnabled(app.item(CalibrateHealth)),
+                    "área retangular nova sem regra não oferece calibrar vida cheia");
             screenshot(app,pictures,L"ui-hud-sem-regra.png");
+            app.area()->healthCalibration={4,4,48,5,190,42,28};app.makeUI();
+            require(shows(app,L"Vida cheia calibrada")&&!shows(app,L"Área pronta para destaque"),
+                    "área de vida calibrada sem regra ainda é descrita somente como destaque");
+            app.area()->healthCalibration={};app.makeUI();
             app.area()->region={};app.makeUI();
             require(!IsWindowEnabled(app.item(CalibrateArea)),"medição habilitada antes de selecionar a área");
+            require(app.item(CalibrateHealth)&&!IsWindowEnabled(app.item(CalibrateHealth)),
+                    "calibração de vida habilitada antes de selecionar a área");
             choose(app,AreaList,0,true);app.area()->iconCalibrated=false;app.makeUI();
             require(IsWindowEnabled(app.item(CalibrateArea))&&!aa::readinessIssues(app.workspace).empty(),"origem deixou de exigir medição");
             screenshot(app,pictures,L"ui-hud-leitura.png");

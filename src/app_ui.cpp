@@ -91,13 +91,14 @@ std::wstring regionText(const aa::HudArea& area,AreaUsage usage) {
     auto value=area.region.shape==aa::RegionShape::Circle?
         L"Área circular salva: "+std::to_wstring(area.region.width)+L" px de diâmetro.\n":
         L"Área retangular salva: "+std::to_wstring(area.region.width)+L" × "+std::to_wstring(area.region.height)+L" px.\n";
-    if(usage.highlight&&!usage.read)return value+L"Uso: receber destaque.\nNão precisa medir ícone. A área define o destaque.";
+    if(usage.highlight&&!usage.read&&!usage.health&&!area.healthCalibration.valid())return value+L"Uso: receber destaque.\nNão precisa medir ícone. A área define o destaque.";
     value+=usage.read?(usage.highlight?L"Uso: buscar status e receber destaque.\n":L"Uso: buscar status.\n"):
-        L"Sem uso nas regras. Área pronta para destaque.\n";
-    if(area.iconCalibrated)value+=L"Ícone para busca de status: "+std::to_wstring(area.iconSize)+L" px.";
+        usage.health?(usage.highlight?L"Uso: ler vida e receber destaque.\n":L"Uso: ler vida.\n"):
+        area.healthCalibration.valid()?L"Área disponível para condições de vida.\n":L"Sem uso nas regras. Área pronta para destaque.\n";
+    if(usage.read&&area.iconCalibrated)value+=L"Ícone para busca de status: "+std::to_wstring(area.iconSize)+L" px.";
     else if(usage.read)value+=usage.highlight?L"Destaque pronto. Meça o ícone apenas para a busca.":L"Meça um ícone de status dentro desta área.";
-    else value+=L"Medição opcional, apenas para buscar status.";
-    if(usage.health)value+=(area.healthCalibration.valid()?L"\nVida cheia calibrada.":L"\nCalibre a vida cheia para usar condições de percentual.");
+    else if(!usage.health&&!area.healthCalibration.valid())value+=L"Medição opcional, apenas para buscar status.";
+    if(usage.health||area.healthCalibration.valid())value+=(area.healthCalibration.valid()?L"\nVida cheia calibrada.":L"\nCalibre a vida cheia para usar condições de percentual.");
     return value;
 }
 void setIfChanged(HWND control,const std::wstring& value) {
@@ -270,7 +271,7 @@ void App::makeUI() {
                 choose(areas,selectedArea,true);
                 const auto usage=area()?areaUsage(workspace,area()->name):AreaUsage{};
                 button(L"Criar",NewArea,282,275,180);button(L"Renomear",RenameArea,474,275,180);button(L"Excluir",DeleteArea,666,275,166);
-                button(L"Selecionar \u00e1rea",SelectArea,282,323,180);if(area()&&(usage.read||!usage.highlight))button(L"Medir \u00edcone",CalibrateArea,474,323,176);if(area()&&usage.health)button(L"Calibrar vida cheia",CalibrateHealth,662,323,170);
+                button(L"Selecionar \u00e1rea",SelectArea,282,323,180);if(area()&&(usage.read||!usage.highlight))button(L"Medir \u00edcone",CalibrateArea,474,323,176);button(L"Calibrar vida cheia",CalibrateHealth,662,323,170);
                 label(area()?regionText(*area(),usage).c_str():L"",282,378,550,78);
                 if(area()&&usage.read)label(L"Me\u00e7a o \u00edcone somente para \u00e1reas que leem status.",282,449,520,24);
                 theme::styleControl(item(SelectArea),theme::Role::Primary);
@@ -591,7 +592,7 @@ void App::command(int id,int notification) {
         confirmGeometry(*currentHud,chosen->screen);auto& value=currentHud->areas[static_cast<std::size_t>(selectedArea)];
         if(id==SelectArea) {
             currentHud->clientWidth=chosen->screen.width;currentHud->clientHeight=chosen->screen.height;currentHud->monitorDpi=chosen->screen.dpi;currentHud->monitorDevice=chosen->screen.device;
-            value.region=chosen->area;value.iconCalibrated=false;error=L"Área salva.";
+            value.replaceRegion(chosen->area);error=L"Área salva.";
         } else {
             const auto& r=chosen->area;const auto& a=value.region;
             if(r.x<a.x||r.y<a.y||r.x+r.width>a.x+a.width||r.y+r.height>a.y+a.height||!a.contains(r.x+r.width/2.0,r.y+r.height/2.0))

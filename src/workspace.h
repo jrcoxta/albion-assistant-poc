@@ -11,6 +11,11 @@ struct HudArea {
     int iconSize = 48;
     bool iconCalibrated = false;
     HealthCalibration healthCalibration;
+    void replaceRegion(Region selected) {
+        region = selected;
+        iconCalibrated = false;
+        healthCalibration = {};
+    }
 };
 struct HudLayout {
     std::wstring id, name;
