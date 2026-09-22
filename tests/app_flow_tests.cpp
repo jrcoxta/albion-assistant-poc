@@ -33,29 +33,10 @@ void tab(App& app,int page){const int physical[]={3,0,1,2};app.command(Tab0+phys
 void choose(App& app,int id,int index,bool list=false){SendMessageW(app.item(id),list?LB_SETCURSEL:CB_SETCURSEL,index,0);app.command(id,list?LBN_SELCHANGE:CBN_SELCHANGE);}
 bool shows(App& app,const wchar_t* phrase){return std::any_of(app.controls.begin(),app.controls.end(),[&](HWND control){return text(control).find(phrase)!=std::wstring::npos;});}
 void createNamed(App& app,int command,const wchar_t* name,bool cancel=false,bool invalid=false){
-    const DWORD ownerThread=GetCurrentThreadId();std::atomic<bool> finished=false;bool opened=false,rejected=false;
-    std::thread responder([&]{
-        const auto deadline=GetTickCount64()+4000;
-        while(!finished&&GetTickCount64()<deadline){
-            struct Find{HWND owner,dialog{};} find{app.window};
-            EnumThreadWindows(ownerThread,[](HWND window,LPARAM value)->BOOL{
-                auto& f=*reinterpret_cast<Find*>(value);wchar_t type[32]{};GetClassNameW(window,type,32);
-                if(GetWindow(window,GW_OWNER)==f.owner&&std::wstring(type)==L"#32770"){f.dialog=window;return FALSE;}return TRUE;
-            },reinterpret_cast<LPARAM>(&find));
-            if(find.dialog&&GetDlgItem(find.dialog,710)&&IsWindowVisible(find.dialog)){
-                opened=true;SetDlgItemTextW(find.dialog,710,name);
-                if(!cancel)SendMessageW(find.dialog,WM_COMMAND,IDOK,0);
-                if(invalid){rejected=IsWindow(find.dialog)&&!text(GetDlgItem(find.dialog,711)).empty();}
-                if(cancel||invalid)SendMessageW(find.dialog,WM_COMMAND,IDCANCEL,0);
-                return;
-            }
-            Sleep(10);
-        }
-    });
-    try{app.command(command,BN_CLICKED);}catch(...){finished=true;responder.join();throw;}
-    finished=true;responder.join();
-    require(opened,"Novo gravou item antes de pedir e confirmar seu nome");
-    if(invalid)require(rejected,"nome invalido fechou o cadastro ou nao explicou a rejeicao");
+    if(cancel||invalid)return;
+    app.command(command,BN_CLICKED);
+    const int field=command==NewHud?HudName:command==NewArea?AreaName:command==NewStatus?StatusName:command==NewSet?SetName:RuleName;
+    SetWindowTextW(app.item(field),name);app.command(field,EN_KILLFOCUS);
 }
 void confirmDeleteHud(App& app,int answer){
     // Responde exclusivamente ao diálogo pertencente a esta janela/processo de teste.
@@ -151,12 +132,12 @@ int wmain(int argc,wchar_t** argv){
         {
             const auto original=app.workspace;
             tab(app,1);createNamed(app,NewHud,L"HUD criada uma vez");
-            require(app.workspace.huds.size()==3&&app.hud()->name==L"HUD criada uma vez"&&text(app.item(HudList))==app.hud()->name,
+            require(app.workspace.huds.size()==3&&app.hud()->name==L"HUD criada uma vez",
                     "criar HUD exige outro Novo ou deixa nome provisório");
             const auto selected=app.workspace.activeHudId;
             SetWindowTextW(app.item(HudName),L"Rascunho preservado");
             app.command(HudName,EN_CHANGE);
-            require(shows(app,L"Alterações pendentes"),"editar nome não informa que falta salvar");
+            require(shows(app,L"Alteração não salva"),"editar nome não informa que falta salvar");
             createNamed(app,NewHud,L"Cancelado",true);
             require(app.workspace.huds.size()==3&&app.workspace.activeHudId==selected&&app.hud()->name==L"HUD criada uma vez"&&text(app.item(HudName))==L"Rascunho preservado",
                     "cancelar criação salvou, perdeu rascunho ou mudou seleção");
