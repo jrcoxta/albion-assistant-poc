@@ -65,3 +65,27 @@ mantém cinco quando a grade oferece cinco ou mais. Menos de quatro não
 é evidência suficiente. Máscara, contraste, ambiguidade e presença continuam
 com os mesmos critérios. Isso não resolve a frente encoberta pelo número
 nem o disco sem contraste logo depois de uma renovação.
+
+## HUD monitor-34 — renovação do Espírito Assassino
+
+Recortes reais de 23/09/2026, **44 × 46 px** a partir de `(0, 47)` da ROI
+externa `meu-personagem-buffs-debuffs` (253 × 106), sem redimensionar nem
+ajustar pixels. O ícone de 42 px é localizado em `(0, 2)`; a pequena margem
+preserva o alinhamento próprio do leitor temporal. `hud34-identity-42.png` é a referência própria salva para o
+status; `hud34-stack3-42.png` é a amostra cadastrada de três stacks. O primeiro
+número do nome dos demais PNGs é o índice da captura e o segundo é o tempo
+monotônico relativo, não a duração restante esperada.
+
+- `hud34-9`, `hud34-18` e `hud34-28`: três stacks visíveis, frente a cerca de
+  38°, 61° e 203°; a amostra de 28 já era reconhecida com o critério antigo.
+- `hud34-12`: frente inicial perto do limite angular, sem leitura radial
+  confiável; `hud34-24`: frente ambígua/encoberta; `hud34-30`: status ausente.
+
+O usuário confirmou que a habilidade dura aproximadamente 8 s e que os
+ataques acrescentam/renovam stacks a cada aproximadamente 2 s. Na sequência,
+a frente avança e volta ao início nesses intervalos; isso não autoriza
+contagem a partir do instante em que há três stacks. A regressão só permite
+o ajuste adicional para a **referência temporal nativa** explicitamente
+instalada pelo aplicativo. Referências pessoais, ausência e frente sem prova
+mantêm a leitura incerta. A indicação no overlay e a precisão do término
+continuam dependentes de teste ao vivo.

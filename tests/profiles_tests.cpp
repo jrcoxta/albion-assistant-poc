@@ -162,8 +162,8 @@ void compatibilityTests() {
           "qualquer dimensao diferente e incompatível");
     check(!aa::matchesScreen(profile, 1920, 1080, 120, L"\\\\.\\DISPLAY1"),
           "DPI conhecido diferente e incompativel");
-    check(!aa::matchesScreen(profile, 1920, 1080, 144, L"\\\\.\\DISPLAY2"),
-          "dispositivo conhecido diferente e incompativel");
+    check(aa::matchesScreen(profile, 1920, 1080, 144, L"\\\\.\\DISPLAY2"),
+          "renumeracao de monitor nao invalida geometria e DPI iguais");
     check(aa::matchesScreen(profile, 1920, 1080, 0, L""),
           "metadados atuais desconhecidos nao inventam incompatibilidade");
 

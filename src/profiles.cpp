@@ -173,11 +173,11 @@ std::wstring uniqueHudName(const std::vector<HudProfile>& profiles, const std::w
 }
 
 bool matchesScreen(const Settings& settings, int width, int height, unsigned dpi,
-                   const std::wstring& device) {
+                    const std::wstring& device) {
+    (void)device; // \\.\DISPLAYn pode mudar ao reconectar ou trocar a tela principal.
     if (width <= 0 || height <= 0 || settings.clientWidth != width || settings.clientHeight != height)
         return false;
     if (settings.monitorDpi != 0 && dpi != 0 && settings.monitorDpi != dpi) return false;
-    if (!settings.monitorDevice.empty() && !device.empty() && settings.monitorDevice != device) return false;
     return true;
 }
 }

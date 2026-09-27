@@ -6,8 +6,10 @@ class Recognizer {
 public:
     explicit Recognizer(const std::filesystem::path& assetsDir = {});
     void setReference(const Image& image);
-    bool setClockReference(const Image& image);
-    bool setClockFallback(const Image& image);
+    // Apenas o recurso nativo do Assassino recebe tolerância extra de ajuste;
+    // referências capturadas e outros status mantêm o critério conservador.
+    bool setClockReference(const Image& image, bool nativeAssassin = false);
+    bool setClockFallback(const Image& image, bool nativeAssassin = false);
     bool clockReady() const;
     void clearStackReferences();
     // Recortes de 24..256 px com contador branco, rótulos 1..99; inválidos não alteram amostras.
@@ -22,5 +24,7 @@ private:
     std::vector<StackReference> stackReferences_;
     Image clockReference_;
     Image clockFallback_;
+    bool nativeClockReference_ = false;
+    bool nativeClockFallback_ = false;
 };
 }

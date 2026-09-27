@@ -1,5 +1,6 @@
 #pragma once
 #include "overlay_effect.h"
+#include <limits>
 #include <windows.h>
 
 // Construção, uso e destruição exclusivamente na thread da UI.
@@ -31,6 +32,7 @@ private:
     POINT source_{};
     SIZE size_{};
     BYTE opacity_ = 255;
-    bool draw(int iconWidth, int iconHeight);
+    std::uint64_t frame_ = (std::numeric_limits<std::uint64_t>::max)();
+    bool draw(int iconWidth, int iconHeight, std::uint64_t elapsedMs);
     void hide();
 };

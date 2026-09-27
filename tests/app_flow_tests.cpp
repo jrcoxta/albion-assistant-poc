@@ -110,6 +110,25 @@ int wmain(int argc,wchar_t** argv){
         app.window=CreateWindowExW(0,cls.lpszClassName,L"Validação do painel",WS_OVERLAPPED|WS_CAPTION,20,20,880,740,nullptr,nullptr,app.instance,&app);
         app.target=CreateWindowExW(0,L"STATIC",L"Alvo do teste",WS_POPUP,0,0,800,600,nullptr,nullptr,app.instance,nullptr);
         require(app.window&&app.target,"janelas de teste não criadas");app.makeUI();
+        {
+            const auto actual=screenOf(app.target);
+            auto saved=notebook;saved.clientWidth=actual.width;saved.clientHeight=actual.height;
+            saved.monitorDpi=actual.dpi;saved.monitorDevice=actual.device+L"-anterior";
+            require(matchesHudScreen(saved,actual)&&hudScreenIssue(saved,actual).empty(),
+                    "DISPLAY renumerado bloqueou HUD com mesmo tamanho e DPI");
+            saved.clientWidth++;
+            require(!matchesHudScreen(saved,actual)&&hudScreenIssue(saved,actual).find(L"O tamanho da janela mudou")!=std::wstring::npos,
+                    "largura diferente não invalidou HUD ou não explicou o motivo");
+            saved.clientWidth--;saved.clientHeight++;
+            require(!matchesHudScreen(saved,actual),"altura diferente não invalidou HUD");
+            saved.clientHeight--;saved.monitorDpi=actual.dpi+24;
+            require(!matchesHudScreen(saved,actual)&&hudScreenIssue(saved,actual).find(L"O DPI mudou")!=std::wstring::npos,
+                    "DPI diferente não invalidou HUD ou não explicou o motivo");
+            saved.monitorDpi=0;require(matchesHudScreen(saved,actual),"HUD legada sem DPI não foi aceita");
+            saved.clientWidth=0;require(!matchesHudScreen(saved,actual),"HUD sem tamanho foi aceita");
+            bool missingWindow=false;try{(void)screenOf(nullptr);}catch(const std::exception&){missingWindow=true;}
+            require(missingWindow,"janela inexistente recebeu geometria válida");
+        }
         require(app.item(HudList)!=nullptr&&text(app.item(HudName))==L"Renomear"&&app.item(NewHud)&&app.item(DeleteHud)&&!app.item(Start),"HUD existente deve ter seletor e ações diretas");
         require(sameTop(app.item(NewHud),app.item(HudName))&&sameTop(app.item(HudName),app.item(DeleteHud)),"ações da HUD devem ficar na mesma linha");
         require(!IsWindowVisible(app.window)&&!app.rebuilding,"construção mostrou janela originalmente oculta ou deixou bloqueio ativo");
@@ -272,12 +291,24 @@ int wmain(int argc,wchar_t** argv){
         require(app.workspace.validityMs==savedValidity&&aa::loadWorkspace(app.workspacePath,{}).validityMs==savedValidity,
             "início com campo inválido alterou ajuste salvo");
         SetWindowTextW(app.item(Validity),std::to_wstring(savedValidity).c_str());
+        const auto actual=screenOf(app.target);
+        app.hud()->monitorDpi=actual.dpi;app.hud()->monitorDevice=actual.device+L"-anterior";
+        require(app.geometryMatches(),"app ainda bloqueou DISPLAY renumerado");
+        const auto planBeforeScreenTest=app.plan;
+        app.start();require(app.running,"Iniciar bloqueou HUD compatível com monitor renumerado");app.stop();
+        app.plan=planBeforeScreenTest;
         app.hud()->clientWidth=900;app.start();
         require(!app.running&&std::any_of(app.controls.begin(),app.controls.end(),[](HWND control){
-            return text(control).find(L"A HUD não corresponde à resolução/escala atual")!=std::wstring::npos;
-        }),"orientação de tela incompatível desapareceu ao resumir o rodapé");
+            const auto message=text(control);
+            return message.find(L"HUD \"Monitor 34\": 900 × 600 px, DPI ")!=std::wstring::npos&&
+                message.find(L"jogo: 800 × 600 px, DPI ")!=std::wstring::npos;
+        }),"diagnóstico esperado × atual desapareceu ao resumir o rodapé");
         screenshot(app,pictures,L"ui-monitor-screen-mismatch.png");
-        app.hud()->clientWidth=800;
+        app.hud()->clientWidth=800;app.hud()->monitorDpi=actual.dpi+24;app.start();
+        require(!app.running&&app.error.find(L"O DPI mudou")!=std::wstring::npos&&
+            app.error.find(L"DPI "+std::to_wstring(actual.dpi+24))!=std::wstring::npos,
+            "DPI incompatível não bloqueou com valor esperado e motivo");
+        app.hud()->monitorDpi=0;app.hud()->monitorDevice.clear();
 
         tab(app,1);require(app.item(HudName)&&text(app.item(HudName))==L"Renomear"&&app.item(NewHud)&&app.item(DeleteHud)&&!shows(app,L"Opções da HUD")&&!app.item(AreaName)&&!app.item(RuleName)&&!app.item(CaptureStatus),"HUD deve expor renomear e excluir diretamente");
         require(app.item(RenameArea)&&!app.item(AreaName),"área deve usar a lista como nome e renomear por ação explícita");
@@ -327,6 +358,17 @@ int wmain(int argc,wchar_t** argv){
             app.saveEditor();const auto saved=aa::loadWorkspace(app.workspacePath,{});
             require(saved.huds[1].areas[1].iconCalibrated&&saved.huds[1].areas[1].iconSize==57&&
                 saved.sets[0].rules[0].targetArea==original.sets[0].rules[0].targetArea,"interface alterou medição ou regra salva");
+            app.area()->readyReferencePath=app.storeImage(L"skill",aa::loadImageResource(IDR_ASSASSIN_NONE));
+            app.makeUI();
+            require(app.skillPreview.valid()&&IsWindowEnabled(app.item(ConfirmReadySkill))&&!app.area()->readyConfirmed,
+                    "imagem de habilidade nao apareceu para confirmacao");
+            SendMessageW(app.item(ConfirmReadySkill),BM_SETCHECK,BST_CHECKED,0);
+            app.running=true;app.command(ConfirmReadySkill,BN_CLICKED);
+            require(!app.running&&app.area()->readyConfirmed&&aa::loadWorkspace(app.workspacePath,{}).huds[1].areas[1].readyConfirmed,
+                    "confirmacao de habilidade nao parou leitura ou nao persistiu");
+            SendMessageW(app.item(ConfirmReadySkill),BM_SETCHECK,BST_UNCHECKED,0);
+            app.running=true;app.command(ConfirmReadySkill,BN_CLICKED);
+            require(!app.running&&!app.area()->readyConfirmed,"revogacao de imagem pronta nao interrompeu a leitura");
             app.commit(original);app.selectedArea=0;app.makeUI();
         }
         screenshot(app,pictures,L"ui-huds.png");
@@ -372,8 +414,15 @@ int wmain(int argc,wchar_t** argv){
         if(visibleTrigger.condition.condition==aa::Condition::StacksEqual)require(text(app.item(Stacks))==std::to_wstring(visibleTrigger.condition.stacks),"stacks exibidos não correspondem à condição selecionada");
         if(visibleTrigger.condition.condition==aa::Condition::StacksEqual)require(app.item(CaptureRuleStack),"regra de stacks nao oferece captura da propria amostra");
         screenshot(app,pictures,L"ui-regras.png");
-        require(SendMessageW(app.item(EffectBox),CB_GETCOUNT,0,0)==4&&app.item(SampleColor),"efeitos e captura de cor ausentes");
+        require(SendMessageW(app.item(EffectBox),CB_GETCOUNT,0,0)==5&&app.item(SampleColor),"efeitos e captura de cor ausentes");
         require(app.item(FollowClock)&&SendMessageW(app.item(FollowClock),BM_GETCHECK,0,0)==BST_UNCHECKED,"opcao de acompanhar relogio ausente ou ligada no legado");
+        require(app.item(OnlyWhenReady)&&SendMessageW(app.item(OnlyWhenReady),BM_GETCHECK,0,0)==BST_UNCHECKED,
+                "filtro de cooldown alterou uma regra antiga");
+        SendMessageW(app.item(OnlyWhenReady),BM_SETCHECK,BST_CHECKED,0);app.command(OnlyWhenReady,BN_CLICKED);
+        require(app.rule()->onlyWhenReady&&aa::loadWorkspace(app.workspacePath,{}).sets[0].rules[0].onlyWhenReady,
+                "checkbox de cooldown nao persistiu");
+        SendMessageW(app.item(OnlyWhenReady),BM_SETCHECK,BST_UNCHECKED,0);app.command(OnlyWhenReady,BN_CLICKED);
+        require(!app.rule()->onlyWhenReady,"filtro de cooldown nao voltou ao padrao desligado");
         {
             SendMessageW(app.item(FollowClock),BM_CLICK,0,0);app.rebuildUIWithDraft();
             require(SendMessageW(app.item(FollowClock),BM_GETCHECK,0,0)==BST_CHECKED,"DPI perdeu opcao de relogio");
@@ -395,7 +444,7 @@ int wmain(int argc,wchar_t** argv){
             require(SendMessageW(combo,CB_GETCURSEL,0,0)==1&&!SendMessageW(combo,CB_GETDROPPEDSTATE,0,0),"combo com tema não aceita escolha pelo teclado");
             ShowWindow(app.window,SW_HIDE);
         }
-        for(int effect=0;effect<4;++effect){choose(app,EffectBox,effect);app.saveEditor();require(static_cast<int>(aa::loadWorkspace(app.workspacePath,{}).sets[0].rules[0].effect)==effect,"efeito da interface não persiste");}
+        for(int effect=0;effect<5;++effect){choose(app,EffectBox,effect);app.saveEditor();require(static_cast<int>(aa::loadWorkspace(app.workspacePath,{}).sets[0].rules[0].effect)==effect,"efeito da interface não persiste");}
         {
             const auto before=app.workspace;
             aa::Image colored{64,64,std::vector<std::uint8_t>(64*64*4,255)};
@@ -480,8 +529,9 @@ int wmain(int argc,wchar_t** argv){
             require(makeRecognizer(clockReader)->recognizeNearSize(liveClock,38).remainingFraction.has_value(),
                     "referencia temporal sombreada escondeu o relogio limpo do Assassino");
             clockReader.status.clockReferencePath.clear();
-            clockReader.status.referencePath=app.storeImage(L"other",aa::loadImage(std::filesystem::path(__FILE__).parent_path().parent_path()/L"assets"/L"other-food.png"));
-            require(!makeRecognizer(clockReader)->clockReady(),"status diferente herdou relogio do Assassino");
+            clockReader.status.name=L"Fender Armadura";
+            clockReader.status.referencePath=app.storeImage(L"fender",aa::loadImage(std::filesystem::path(__FILE__).parent_path().parent_path()/L"assets"/L"other-buff.png"));
+            require(!makeRecognizer(clockReader)->clockReady(),"Fender sem referencia temporal herdou relogio do Assassino");
             app.makeUI();screenshot(app,pictures,L"ui-status-relogio.png");
             app.commit(before);app.makeUI();
         }

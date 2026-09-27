@@ -63,6 +63,32 @@ int main(){try{
     }
     std::vector<aa::Observation> obs={{{aa::Presence::Present,3,1,{},{}},1000,7},{{aa::Presence::Absent,{},1,{},{}},1000,7}};
     {
+        auto guarded=w;
+        guarded.huds[0].areas[3].readyReferencePath=std::filesystem::path(__FILE__).wstring();
+        guarded.huds[0].areas[3].readyConfirmed=true;
+        guarded.sets[0].rules[0].onlyWhenReady=true;
+        const auto guardedPlan=aa::makeMonitorPlan(guarded);
+        require(guardedPlan.captureArea.y+guardedPlan.captureArea.height==540,
+                "captura nao incluiu a habilidade de destino");
+        require(aa::evaluateMonitor(guardedPlan,obs,1000,750,7)==std::vector<bool>({false,false,false}),
+                "regra seguinte acendeu a habilidade em cooldown");
+        const std::vector<bool> ready{true,false,false};
+        require(aa::evaluateMonitor(guardedPlan,obs,1000,750,7,nullptr,&ready)==std::vector<bool>({true,false,false}),
+                "habilidade pronta nao habilitou a regra prioritaria");
+        const std::vector<bool> cooldown{false,false,false};
+        require(aa::evaluateMonitor(guardedPlan,obs,1000,750,7,nullptr,&cooldown)==std::vector<bool>({false,false,false}),
+                "cooldown nao bloqueou outras regras do mesmo destino");
+        guarded.huds[0].areas.push_back({L"E com outro nome",{400,500,40,40},48,false});
+        guarded.sets[0].rules[2].targetArea=L"E com outro nome";
+        const auto aliasPlan=aa::makeMonitorPlan(guarded);
+        require(aa::evaluateMonitor(aliasPlan,obs,1000,750,7,nullptr,&cooldown)==std::vector<bool>({false,false,false}),
+                "area com outro nome no mesmo icone ignorou cooldown");
+        require(aa::evaluateMonitor(aliasPlan,obs,1000,750,7,nullptr,&ready)==std::vector<bool>({true,false,false}),
+                "area duplicada no mesmo icone ultrapassou a prioridade");
+        guarded.huds[0].areas[3].replaceRegion({400,500,40,40});
+        require(!aa::readinessIssues(guarded).empty(),"mover a habilidade conservou uma amostra antiga");
+    }
+    {
         auto timed=plan;for(auto& action:timed.actions)action.rule.followClock=true;
         auto readings=obs;readings[0].detection.remainingFraction=.3f;
         std::vector<std::optional<float>> remaining;
@@ -82,6 +108,35 @@ int main(){try{
         timed.actions[0].rule.condition.condition=aa::Condition::Absent;readings[0].detection.presence=aa::Presence::Absent;
         require(evaluate()[0]&&!remaining[0],"regra de ausencia mostrou tempo restante");
         readings.clear();require(evaluate()==std::vector<bool>({false,false,false})&&!remaining[0]&&!remaining[1],"lote incompleto manteve aro anterior");
+    }
+    {
+        auto alternatives=w;
+        const auto assets=std::filesystem::path(__FILE__).parent_path().parent_path()/L"assets";
+        alternatives.statuses[1].builtinAssassin=false;
+        alternatives.statuses[1].referencePath=(assets/L"other-buff.png").wstring();
+        alternatives.statuses[1].stacks={{3,(assets/L"assassin-3-40.png").wstring()}};
+        alternatives.statuses[1].clockReferencePath.clear();
+        auto& action=alternatives.sets[0].rules[0];
+        action.action=action.condition;action.followClock=true;
+        auto first=aa::RuleTrigger{L"assassin",L"a",L"Buffs",action.condition,{},L""};
+        auto second=aa::RuleTrigger{L"fender",L"b",L"Debuffs",action.condition,{},L""};
+        action.triggers={first,second};
+        alternatives.sets[0].rules={action};
+        const auto alternatePlan=aa::makeMonitorPlan(alternatives);
+        require(alternatePlan.readers.size()==2&&alternatePlan.readers[0].needsClock&&alternatePlan.readers[1].needsClock,
+                "regra OU nao solicitou leitura temporal separada por status");
+        auto current=std::vector<aa::Observation>{{{aa::Presence::Present,2u,1.f,{},{}},1000,7},
+                                                   {{aa::Presence::Present,3u,1.f,{},{}},1000,7}};
+        current[0].detection.remainingFraction=.6f;
+        std::vector<std::optional<float>> remaining;
+        require(aa::evaluateMonitor(alternatePlan,current,1000,750,7,&remaining)==std::vector<bool>({true})&&
+                !remaining[0],"ramo Fender sem relogio herdou tempo do Assassino nao correspondente");
+        current[0].detection.stacks=3u;
+        require(aa::evaluateMonitor(alternatePlan,current,1000,750,7,&remaining)==std::vector<bool>({true})&&
+                remaining[0]==.6f,"ramo Assassino com tres stacks perdeu seu relogio observado");
+        current[0].detection.presence=aa::Presence::Absent;
+        require(aa::evaluateMonitor(alternatePlan,current,1000,750,7,&remaining)==std::vector<bool>({true})&&
+                !remaining[0],"aro anterior persistiu ao mudar para ramo sem relogio");
     }
     {
         auto composite=w;
@@ -117,6 +172,27 @@ int main(){try{
         require(!aa::evaluateMonitor(healthPlan,healthReadings,1000,750,7)[0],"vida incerta ativou a regra");
         healthReadings[lifeIndex].healthFraction=.50f;
         require(!aa::evaluateMonitor(healthPlan,healthReadings,1000,750,7)[0],"vida nova sem limiar reutilizou a histerese incerta");
+        auto mixed=health;
+        mixed.huds[0].areas[3].readyReferencePath=std::filesystem::path(__FILE__).wstring();
+        mixed.huds[0].areas[3].readyConfirmed=true;
+        auto& mixedRule=mixed.sets[0].rules[0];mixedRule.onlyWhenReady=true;
+        aa::RuleTrigger statusTrigger;statusTrigger.id=L"status-alt";statusTrigger.kind=aa::TriggerKind::Status;
+        statusTrigger.statusId=L"a";statusTrigger.sourceArea=L"Buffs";statusTrigger.condition.condition=aa::Condition::Present;
+        mixedRule.triggers={statusTrigger,life};
+        const auto mixedPlan=aa::makeMonitorPlan(mixed);
+        std::vector<aa::Observation> readings(mixedPlan.readers.size());
+        for(auto& reading:readings){reading.capturedMs=1000;reading.source=7;}
+        const auto statusIndex=mixedPlan.actions[0].readers[0],healthIndex=mixedPlan.actions[0].readers[1];
+        const std::vector<bool> ready(mixedPlan.actions.size(),true),cooldown(mixedPlan.actions.size(),false);
+        readings[statusIndex].detection.presence=aa::Presence::Absent;
+        readings[healthIndex].healthFraction=.49f;
+        require(aa::evaluateMonitor(mixedPlan,readings,1000,750,7,nullptr,&ready)[0],"vida 49 nao armou latch");
+        readings[statusIndex].detection.presence=aa::Presence::Present;
+        readings[healthIndex].healthFraction.reset();
+        require(!aa::evaluateMonitor(mixedPlan,readings,1000,750,7,nullptr,&cooldown)[0],"cooldown nao apagou a acao");
+        readings[statusIndex].detection.presence=aa::Presence::Absent;
+        readings[healthIndex].healthFraction=.50f;
+        require(!aa::evaluateMonitor(mixedPlan,readings,1000,750,7,nullptr,&ready)[0],"status OU vida conservou histerese invalida");
     }
     require(aa::evaluateMonitor(plan,obs,1000,750,7)==std::vector<bool>({true,false,false}),"prioridade de destino ou condicao incorreta");
     obs[0].detection.stacks=2;obs[1].detection.presence=aa::Presence::Present;

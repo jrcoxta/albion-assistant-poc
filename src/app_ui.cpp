@@ -12,7 +12,7 @@ namespace {
 enum {ActiveNames=600, MonitorSummary, RulePhrase, ActiveSetName};
 constexpr COLORREF Colors[]={RGB(255,191,0),RGB(40,255,120),RGB(60,180,255),RGB(240,80,255)};
 const wchar_t* ColorNames[]={L"Dourado",L"Verde",L"Azul",L"Magenta"};
-const wchar_t* EffectNames[]={L"Borda",L"Brilho",L"Pulso",L"Halo"};
+const wchar_t* EffectNames[]={L"Borda",L"Brilho",L"Pulso",L"Halo",L"Chamas"};
 
 struct RebuildScope {
     App& app;bool previous;
@@ -61,14 +61,9 @@ template<class Collection> void checkName(const Collection& collection,const std
     if(std::any_of(collection.begin(),collection.end(),[&](const auto& value){return value.id!=id&&aa::sameName(value.name,name);}))
         throw std::runtime_error("Esse nome já está em uso. Escolha outro nome.");
 }
-bool matches(const aa::HudLayout& hud,const Screen& screen) {
-    return hud.clientWidth==screen.width&&hud.clientHeight==screen.height&&
-        (!hud.monitorDpi||!screen.dpi||hud.monitorDpi==screen.dpi)&&
-        (hud.monitorDevice.empty()||screen.device.empty()||hud.monitorDevice==screen.device);
-}
 void confirmGeometry(const aa::HudLayout& hud,const Screen& screen) {
-    if(hud.clientWidth>0&&!matches(hud,screen))
-        throw std::runtime_error("Esta HUD pertence a outra tela ou escala. Crie uma nova HUD para preservar as áreas já salvas.");
+    if(hud.clientWidth>0&&!matchesHudScreen(hud,screen))
+        throw std::runtime_error(utf8(hudScreenIssue(hud,screen)));
 }
 aa::Condition conditionFrom(int index) {
     return index==2?aa::Condition::StacksEqual:index==1?aa::Condition::Absent:aa::Condition::Present;
@@ -274,10 +269,18 @@ void App::makeUI() {
                 button(L"Selecionar \u00e1rea",SelectArea,282,323,180);if(area()&&(usage.read||!usage.highlight))button(L"Medir \u00edcone",CalibrateArea,474,323,176);button(L"Calibrar vida cheia",CalibrateHealth,662,323,170);
                 label(area()?regionText(*area(),usage).c_str():L"",282,378,550,78);
                 if(area()&&usage.read)label(L"Me\u00e7a o \u00edcone somente para \u00e1reas que leem status.",282,449,520,24);
+                button(L"Capturar habilidade pronta",CaptureReadySkill,282,483,260);
+                skillPreview={};
+                if(area()&&!area()->readyReferencePath.empty())try{skillPreview=aa::loadImage(area()->readyReferencePath);}catch(const std::exception&){}
+                control(L"BUTTON",L"Estava pronta",WS_TABSTOP|BS_AUTOCHECKBOX,645,485,187,32,ConfirmReadySkill);
+                SendMessageW(item(ConfirmReadySkill),BM_SETCHECK,area()&&area()->readyConfirmed?BST_CHECKED:BST_UNCHECKED,0);
+                EnableWindow(item(ConfirmReadySkill),skillPreview.valid());
+                label(L"Uma habilidade por área/HUD; se trocar o ícone, recapture a imagem.",282,561,550,22);
                 theme::styleControl(item(SelectArea),theme::Role::Primary);
                 for(int id:{DeleteArea,SelectArea,RenameArea})EnableWindow(item(id),area()!=nullptr);
                 EnableWindow(item(CalibrateArea),area()&&area()->region.valid());
                 EnableWindow(item(CalibrateHealth),area()&&area()->region.valid()&&area()->region.shape==aa::RegionShape::Rectangle);
+                EnableWindow(item(CaptureReadySkill),area()&&area()->region.valid()&&area()->region.width>=24&&area()->region.height>=24&&area()->region.width<=256&&area()->region.height<=256);
             }
         }
     } else if(page==1) {
@@ -355,9 +358,12 @@ void App::makeUI() {
                 if(std::find(std::begin(Colors),std::end(Colors),currentRule->action.color)==std::end(Colors)){chosenColor=add(colors,L"Cor salva");SendMessageW(colors,CB_SETITEMDATA,chosenColor,currentRule->action.color);}choose(colors,chosenColor);
                 if(trigger.kind==aa::TriggerKind::Status&&trigger.condition.condition==aa::Condition::StacksEqual){label(L"Amostra de stacks",282,461,160);edit(std::to_wstring(trigger.condition.stacks).c_str(),SampleValue,282,483,58);button(L"Capturar amostra",CaptureRuleStack,352,481,170);const auto sample=std::find_if(trigger.stackSamples.begin(),trigger.stackSamples.end(),[&](const auto& value){return value.value==trigger.condition.stacks;});if(sample!=trigger.stackSamples.end())button(L"Excluir amostra",DeleteRuleStack,534,481,170);}
                 if(trigger.kind==aa::TriggerKind::Status){control(L"BUTTON",L"Aro com previs\u00e3o de tempo",WS_TABSTOP|BS_AUTOCHECKBOX,282,530,300,24,FollowClock);SendMessageW(item(FollowClock),BM_SETCHECK,currentRule->followClock?BST_CHECKED:BST_UNCHECKED,0);}
+                control(L"BUTTON",L"Somente fora do cooldown",WS_TABSTOP|BS_AUTOCHECKBOX,590,530,242,24,OnlyWhenReady);
+                SendMessageW(item(OnlyWhenReady),BM_SETCHECK,currentRule->onlyWhenReady?BST_CHECKED:BST_UNCHECKED,0);
+                label(L"Afeta regras do mesmo destino.",590,554,242,18);
                 button(L"Testar destaque",TestAction,600,574,232);
                 for(int id:{DeleteSet,NewRule,RenameSet})EnableWindow(item(id),set()!=nullptr);
-                for(int id:{Enabled,TriggerList,TriggerKindBox,RuleStatus,SourceArea,HealthArea,HealthComparisonBox,HealthPercent,ConditionBox,Stacks,EffectBox,TargetArea,Color,SampleColor,CaptureRuleStack,DeleteRuleStack,TestAction,DeleteRule,MoveRuleUp,MoveRuleDown,RenameRule,NewTrigger,DeleteTrigger})if(item(id))EnableWindow(item(id),rule()!=nullptr);
+                 for(int id:{Enabled,TriggerList,TriggerKindBox,RuleStatus,SourceArea,HealthArea,HealthComparisonBox,HealthPercent,ConditionBox,Stacks,EffectBox,TargetArea,Color,SampleColor,CaptureRuleStack,DeleteRuleStack,TestAction,DeleteRule,MoveRuleUp,MoveRuleDown,RenameRule,NewTrigger,DeleteTrigger,OnlyWhenReady})if(item(id))EnableWindow(item(id),rule()!=nullptr);
                 EnableWindow(item(DeleteTrigger),currentRule->triggers.size()>1);
                 updateRuleChoices();
             }
@@ -380,12 +386,14 @@ void App::rebuildUIWithDraft() {
     for(int id:{TriggerKindBox,RuleStatus,SourceArea,HealthArea,HealthComparisonBox,TargetArea,ConditionBox,Stacks,EffectBox,Color})if(item(id))choices.push_back({id,text(item(id)),selection(item(id))});
     const auto enabled=item(Enabled)?SendMessageW(item(Enabled),BM_GETCHECK,0,0):BST_UNCHECKED;
     const auto followClock=item(FollowClock)?SendMessageW(item(FollowClock),BM_GETCHECK,0,0):BST_UNCHECKED;
+    const auto onlyWhenReady=item(OnlyWhenReady)?SendMessageW(item(OnlyWhenReady),BM_GETCHECK,0,0):BST_UNCHECKED;
     const auto stackSelected=item(StackList)?selection(item(StackList),true):-1;
     makeUI();
     for(const auto& draft:edits)SetWindowTextW(item(draft.id),draft.value.c_str());
     for(const auto& draft:choices)if(draft.id!=Stacks)choose(item(draft.id),static_cast<int>(draft.selected));
     if(item(Enabled))SendMessageW(item(Enabled),BM_SETCHECK,enabled,0);
     if(item(FollowClock))SendMessageW(item(FollowClock),BM_SETCHECK,followClock,0);
+    if(item(OnlyWhenReady))SendMessageW(item(OnlyWhenReady),BM_SETCHECK,onlyWhenReady,0);
     updateRuleChoices();
     for(const auto& draft:choices)if(draft.id==Stacks)selectText(item(Stacks),draft.value);
     if(item(StackList))choose(item(StackList),stackSelected,true);
@@ -422,9 +430,10 @@ aa::Workspace App::editorValues() {
                 }
             }
             value.action.profile=profile->name;value.action.enabled=SendMessageW(item(Enabled),BM_GETCHECK,0,0)==BST_CHECKED;
+            value.onlyWhenReady=SendMessageW(item(OnlyWhenReady),BM_GETCHECK,0,0)==BST_CHECKED;
             if(trigger.kind==aa::TriggerKind::Status)value.followClock=trigger.condition.condition!=aa::Condition::Absent&&SendMessageW(item(FollowClock),BM_GETCHECK,0,0)==BST_CHECKED;
             value.targetArea=text(item(TargetArea));
-            value.effect=static_cast<aa::OverlayEffect>(std::clamp(selection(item(EffectBox)),0,3));
+            value.effect=static_cast<aa::OverlayEffect>(std::clamp(selection(item(EffectBox)),0,4));
             const auto color=selection(item(Color));if(color>=0)value.action.color=static_cast<std::uint32_t>(SendMessageW(item(Color),CB_GETITEMDATA,color,0));
             trigger.condition.enabled=value.action.enabled;trigger.condition.name=value.action.name;
             const auto& first=value.triggers.front();value.condition=first.condition;value.condition.name=value.action.name;value.condition.profile=value.action.profile;value.condition.enabled=value.action.enabled;value.condition.color=value.action.color;
@@ -480,18 +489,31 @@ void App::command(int id,int notification) {
     if(id==RenameRule&&notification==BN_CLICKED&&rule()&&set()){const auto name=requestName(*this,RenameRule);if(!name)return;auto changed=editorValues();auto* profile=byId(changed.sets,changed.activeSetId);if(!profile)throw std::runtime_error("Perfil ativo ausente.");auto& value=profile->rules[static_cast<std::size_t>(selectedRule)];value.condition.name=*name;value.action.name=*name;commit(std::move(changed));error=L"Regra renomeada.";makeUI();return;}
     if(id==ShareOverlay&&notification==BN_CLICKED){
         const bool visible=SendMessageW(item(ShareOverlay),BM_GETCHECK,0,0)==BST_CHECKED;
+        if(visible&&running&&std::any_of(plan.actions.begin(),plan.actions.end(),[](const auto& action){return action.rule.onlyWhenReady;})){
+            SendMessageW(item(ShareOverlay),BM_SETCHECK,BST_UNCHECKED,0);
+            error=L"O destaque não pode entrar na captura enquanto a habilidade é analisada.";refreshStatus();return;
+        }
         auto changed=workspace;changed.shareOverlayInCapture=visible;commit(std::move(changed));showOverlayInCapture=visible;
         for(auto& overlay:overlays)overlay->setCaptureVisible(visible);
         if(testOverlay)testOverlay->setCaptureVisible(visible);
         error=visible?L"Overlay incluído no compartilhamento.":L"Overlay oculto em capturas e compartilhamentos.";refreshStatus();return;
     }
+    if(id==ConfirmReadySkill&&notification==BN_CLICKED&&area()){
+        auto changed=workspace;
+        auto& stored=byId(changed.huds,changed.activeHudId)->areas.at(static_cast<std::size_t>(selectedArea));
+        stored.readyConfirmed=SendMessageW(item(ConfirmReadySkill),BM_GETCHECK,0,0)==BST_CHECKED&&skillPreview.valid();
+        const bool confirmed=stored.readyConfirmed;
+        stop();
+        commit(std::move(changed));error=confirmed?L"Imagem de habilidade pronta confirmada.":L"Confirmação removida; filtro de cooldown indisponível.";
+        refreshStatus();return;
+    }
     if((notification==EN_CHANGE&&(id==Validity||id==HealthPercent))||
        (notification==CBN_SELCHANGE&&(id==TriggerKindBox||id==RuleStatus||id==ConditionBox||id==Stacks||id==EffectBox||id==Color||id==SourceArea||id==HealthArea||id==HealthComparisonBox||id==TargetArea))||
-       (notification==BN_CLICKED&&(id==Enabled||id==FollowClock))){
+        (notification==BN_CLICKED&&(id==Enabled||id==FollowClock||id==OnlyWhenReady))){
         error=L"Alteração não salva.";refreshStatus();
     }
     if(id==TriggerList&&notification==CBN_SELCHANGE){selectedTrigger=selection(item(TriggerList));error=L"Condicao selecionada.";makeUI();return;}
-    if((id==FollowClock||id==Enabled)&&notification==BN_CLICKED){updateRuleChoices();saveEditor();error=L"Alteração salva.";refreshStatus();return;}
+    if((id==FollowClock||id==Enabled||id==OnlyWhenReady)&&notification==BN_CLICKED){updateRuleChoices();saveEditor();error=L"Alteração salva.";refreshStatus();return;}
     if(notification==CBN_SELCHANGE&&id==TriggerKindBox){
         const int requested=selection(item(TriggerKindBox));
         const int storedKind=rule()&&rule()->triggers.size()>static_cast<std::size_t>(selectedTrigger)&&rule()->triggers[static_cast<std::size_t>(selectedTrigger)].kind==aa::TriggerKind::Health?1:0;
@@ -534,6 +556,7 @@ void App::command(int id,int notification) {
     if(id==Start){start();refreshStatus();return;}
     if(id==TestAction){testAction();refreshStatus();return;}
     if(id==CalibrateHealth){calibrateHealth();makeUI();return;}
+    if(id==CaptureReadySkill){captureReadySkill();makeUI();return;}
     if(id==SampleColor){sampleActionColor();refreshStatus();return;}
     if(id==CaptureClock){
         saveEditor();stop();
@@ -593,6 +616,11 @@ void App::command(int id,int notification) {
         if(id==SelectArea) {
             currentHud->clientWidth=chosen->screen.width;currentHud->clientHeight=chosen->screen.height;currentHud->monitorDpi=chosen->screen.dpi;currentHud->monitorDevice=chosen->screen.device;
             value.replaceRegion(chosen->area);error=L"Área salva.";
+            if(chosen->image.width>=24&&chosen->image.height>=24&&chosen->image.width<=256&&chosen->image.height<=256){
+                value.readyReferencePath=storeImage(L"skill",chosen->image);
+                value.readyConfirmed=false;
+                error=L"Área e imagem do instante salvas. Para filtrar cooldown, confirme que a habilidade estava pronta.";
+            }
         } else {
             const auto& r=chosen->area;const auto& a=value.region;
             if(r.x<a.x||r.y<a.y||r.x+r.width>a.x+a.width||r.y+r.height>a.y+a.height||!a.contains(r.x+r.width/2.0,r.y+r.height/2.0))
@@ -777,8 +805,16 @@ void App::refreshStatus() {
             summary+=L"\r\n";
         }
         if(plan.readers.empty())summary=L"Aguardando o início das leituras.\r\n";
-        for(std::size_t i=0;i<plan.actions.size();++i)
-            summary+=plan.actions[i].rule.condition.name+L" → "+plan.actions[i].rule.targetArea+(i<lit.size()&&lit[i]?L": DESTAQUE ATIVO":L": apagado")+L"\r\n";
+        for(std::size_t i=0;i<plan.actions.size();++i){
+            summary+=plan.actions[i].rule.condition.name+L" → "+plan.actions[i].rule.targetArea+(i<lit.size()&&lit[i]?L": DESTAQUE ATIVO":L": apagado");
+            if(plan.actions[i].rule.onlyWhenReady){
+                const auto recent=!current.empty()&&current.front().source==source&&current.front().capturedMs>0&&
+                    now>=current.front().capturedMs&&now-current.front().capturedMs<=std::min(workspace.validityMs,250);
+                summary+=recent?(i<currentReady.size()&&currentReady[i]?L" · habilidade pronta":L" · recarga ou imagem incerta"):
+                    L" · sem imagem recente da habilidade";
+            }
+            summary+=L"\r\n";
+        }
     }
     setIfChanged(item(MonitorSummary),summary);
 }
@@ -798,9 +834,9 @@ void App::paint() {
     theme::frame(dc,{px(12),px(128),px(848),px(613)},RGB(39,44,53));
     theme::frame(dc,{px(12),px(619),px(848),px(654)},RGB(54,48,49));
     theme::fill(dc,{px(12),px(619),px(15),px(654)},theme::Accent);
-    if(page==3||(page==1&&selectedStatus())) {
-        const auto& preview=page==3?capturePreview:referencePreview;
-        const RECT bounds=page==3?RECT{px(24),px(486),px(832),px(602)}:RECT{px(282),px(330),px(544),px(481)};
+    if(page==3||(page==1&&selectedStatus())||(page==0&&area()&&area()->region.valid())) {
+        const auto& preview=page==3?capturePreview:page==0?skillPreview:referencePreview;
+        const RECT bounds=page==3?RECT{px(24),px(486),px(832),px(602)}:page==0?RECT{px(551),px(479),px(631),px(559)}:RECT{px(282),px(330),px(544),px(481)};
         theme::fill(dc,bounds,theme::Field);theme::frame(dc,bounds,theme::Border);
         if(preview.valid()) {
             const auto factor=std::min(static_cast<double>(bounds.right-bounds.left)/preview.width,static_cast<double>(bounds.bottom-bounds.top)/preview.height);
@@ -810,7 +846,7 @@ void App::paint() {
             SetStretchBltMode(dc,COLORONCOLOR);StretchDIBits(dc,bounds.left+(bounds.right-bounds.left-width)/2,bounds.top+(bounds.bottom-bounds.top-height)/2,width,height,0,0,preview.width,preview.height,preview.bgra.data(),&info,DIB_RGB_COLORS,SRCCOPY);
         } else {
             SetBkMode(dc,TRANSPARENT);SetTextColor(dc,theme::Muted);SelectObject(dc,font);auto message=bounds;
-            DrawTextW(dc,page==3?(running?L"Aguardando a primeira captura do jogo...":L"Sem captura. Inicie a leitura após resolver as pendências."):L"Cadastre uma imagem de referência.",-1,&message,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+            DrawTextW(dc,page==3?(running?L"Aguardando a primeira captura do jogo...":L"Sem captura. Inicie a leitura após resolver as pendências."):page==0?L"Sem imagem":L"Cadastre uma imagem de referência.",-1,&message,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
         }
     }
     RestoreDC(dc,saved);

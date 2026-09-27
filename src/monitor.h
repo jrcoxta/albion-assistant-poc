@@ -11,6 +11,7 @@ struct MonitorPlan {
 };
 MonitorPlan makeMonitorPlan(const Workspace& workspace);
 std::vector<bool> evaluateMonitor(const MonitorPlan& plan, const std::vector<Observation>& observations,
-                                 std::int64_t nowMs, int validityMs, std::uint64_t source,
-                                 std::vector<std::optional<float>>* remainingFractions=nullptr);
+                                  std::int64_t nowMs, int validityMs, std::uint64_t source,
+                                  std::vector<std::optional<float>>* remainingFractions=nullptr,
+                                  const std::vector<bool>* ready=nullptr);
 }

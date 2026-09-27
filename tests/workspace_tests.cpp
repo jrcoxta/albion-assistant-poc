@@ -115,6 +115,25 @@ void roundtripAndIsolation() {
     check(loaded.sets[0].rules[0].triggers.size() == 1 && loaded.sets[0].rules[0].action.name == L"Pronto: 3",
           "regra salva nao foi migrada para uma acao com um gatilho");
     {
+        auto ready=w;
+        ready.sets[0].rules[0].onlyWhenReady=true;
+        ready.huds[0].areas[1].readyReferencePath=ready.statuses[1].referencePath;
+        ready.huds[0].areas[1].readyConfirmed=true;
+        const auto readyFile=directory.path/L"habilidade.ini";
+        aa::saveWorkspace(readyFile,ready);
+        auto restored=aa::loadWorkspace(readyFile,{});
+        check(restored.sets[0].rules[0].onlyWhenReady&&restored.huds[0].areas[1].readyConfirmed&&restored.huds[0].areas[1].readyReferencePath==ready.huds[0].areas[1].readyReferencePath,
+              "referencia de habilidade e opcao por regra nao sobreviveram ao schema 5");
+        check(aa::readinessIssues(restored).empty(),"habilidade calibrada foi considerada ausente");
+        ini(readyFile,L"hud.0.area.1",L"readyConfirmed",nullptr);
+        const auto older=aa::loadWorkspace(readyFile,{});
+        check(!older.huds[0].areas[1].readyConfirmed&&!aa::readinessIssues(older).empty(),
+              "schema 5 sem confirmacao deveria abrir sem presumir habilidade pronta");
+        restored.huds[0].areas[1].replaceRegion({900,700,60,60});
+        check(restored.huds[0].areas[1].readyReferencePath.empty()&&!aa::readinessIssues(restored).empty(),
+              "reposicionar habilidade nao exigiu nova imagem");
+    }
+    {
         auto health=w;
         health.huds[0].areas[0].healthCalibration={10,14,180,5,190,42,28};
         auto& rule=health.sets[0].rules[0]; rule.action=rule.condition;
@@ -262,7 +281,7 @@ void effectCompatibility() {
     const auto loaded = aa::loadWorkspace(file, {});
     check(loaded.sets[0].rules[0].condition.name == L"Pronto: 3" && loaded.sets[0].rules[0].effect == aa::OverlayEffect::Pulse,
           "efeito explicito nao prevalece sobre brilho legado");
-    for (int effect = 0; effect <= 3; ++effect) {
+    for (int effect = 0; effect <= 4; ++effect) {
         auto changed = loaded; changed.sets[0].rules[0].effect = static_cast<aa::OverlayEffect>(effect);
         aa::saveWorkspace(file, changed);
         const auto restored = aa::loadWorkspace(file, {});
@@ -275,14 +294,14 @@ void effectCompatibility() {
     check(aa::loadWorkspace(file, {}).sets[0].rules[0].effect == aa::OverlayEffect::Glow, "brilho legado nao migra");
     ini(file, L"set.0.rule.0", L"glow", L"0");
     check(aa::loadWorkspace(file, {}).sets[0].rules[0].effect == aa::OverlayEffect::Border, "borda legada nao migra");
-    for (const auto value : {L"4", L"-1", L"x", L""}) {
+    for (const auto value : {L"5", L"-1", L"x", L""}) {
         ini(file, L"set.0.rule.0", L"effect", value);
         const auto intact = bytes(file);
         rejected([&] { (void)aa::loadWorkspace(file, {}); }, "efeito invalido foi aceito");
         check(bytes(file) == intact, "leitura invalida sobrescreveu workspace");
     }
     aa::saveWorkspace(file, loaded);const auto intact = bytes(file);
-    auto invalid = loaded;invalid.sets[0].rules[0].effect = static_cast<aa::OverlayEffect>(4);
+    auto invalid = loaded;invalid.sets[0].rules[0].effect = static_cast<aa::OverlayEffect>(5);
     rejected([&] { aa::saveWorkspace(file, invalid); }, "gravacao aceitou efeito invalido");
     check(bytes(file) == intact, "gravacao invalida alterou workspace salvo");
     ini(file, L"set.0.rule.0", L"glow", L"2");

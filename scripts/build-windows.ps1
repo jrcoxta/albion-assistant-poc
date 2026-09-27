@@ -72,6 +72,13 @@ try {
         }
         Remove-Item -LiteralPath $resolved -Recurse -Force
     }
+    $cache = Join-Path $build 'CMakeCache.txt'
+    if (Test-Path -LiteralPath $cache) {
+        $generator = Select-String -LiteralPath $cache -Pattern '^CMAKE_GENERATOR:INTERNAL=(.+)$' | Select-Object -Last 1
+        if ($generator -and $generator.Matches[0].Groups[1].Value -ne 'Visual Studio 18 2026') {
+            throw "Cache $Configuration usa outro gerador. Execute novamente com -Configuration $Configuration -Clean."
+        }
+    }
     $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
     if (!(Test-Path -LiteralPath $vswhere)) { throw 'Instale Visual Studio Build Tools com o workload Desenvolvimento para desktop com C++.' }
     $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
@@ -84,21 +91,19 @@ try {
     }
     $env:VSLANG = '1033'
     $cmake = Join-Path $vs 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
-    $ninja = Join-Path $vs 'Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe'
     if (!(Test-Path -LiteralPath $cmake)) { $cmake = (Get-Command cmake.exe -ErrorAction Stop).Source }
-    if (!(Test-Path -LiteralPath $ninja)) { $ninja = (Get-Command ninja.exe -ErrorAction Stop).Source }
     $ctest = Join-Path (Split-Path $cmake -Parent) 'ctest.exe'
     $jobs = [Math]::Max(1, [Math]::Min(8, [Environment]::ProcessorCount))
-    Invoke-BuildStep '1/3 Configurando Windows x64...' $cmake @('--preset', $preset, "-DCMAKE_MAKE_PROGRAM=$ninja", '-DCMAKE_CXX_COMPILER=cl.exe')
+    Invoke-BuildStep '1/3 Configurando Windows x64...' $cmake @('--preset', $preset)
     Invoke-BuildStep '2/3 Compilando...' $cmake @('--build', '--preset', $preset, '--parallel', "$jobs")
     Invoke-BuildStep '3/3 Executando testes...' $ctest @('--preset', $preset, '--no-tests=error')
-    $executable = Join-Path $build 'AlbionAssistant.exe'
+    $executable = Join-Path $build "$Configuration\AlbionAssistant.exe"
     if ($Configuration -eq 'Release') {
         & $validator -Directory $dist
-        Invoke-BuildStep 'Publicando o executável testado...' $cmake @('--install', $build, '--prefix', $dist)
+        Invoke-BuildStep 'Publicando o executável testado...' $cmake @('--install', $build, '--config', $Configuration, '--prefix', $dist)
         $executable = Join-Path $dist 'AlbionAssistant.exe'
-        $evidence.sha256 = & $validator -Directory $dist -BuiltExecutable (Join-Path $build 'AlbionAssistant.exe')
-        Invoke-BuildStep 'Conferindo o executável publicado...' (Join-Path $build 'packaging_tests.exe') @($executable)
+        $evidence.sha256 = & $validator -Directory $dist -BuiltExecutable (Join-Path $build "$Configuration\AlbionAssistant.exe")
+        Invoke-BuildStep 'Conferindo o executável publicado...' (Join-Path $build "$Configuration\packaging_tests.exe") @($executable)
     } else {
         $evidence.sha256 = (Get-FileHash -LiteralPath $executable -Algorithm SHA256).Hash
     }

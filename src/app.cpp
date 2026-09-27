@@ -1,6 +1,7 @@
 #include "app.h"
 #include "calibration.h"
 #include "theme.h"
+#include "skill_reader.h"
 #include "../resources/resource.h"
 #include <shlobj.h>
 #include <algorithm>
@@ -68,11 +69,11 @@ std::unique_ptr<aa::Recognizer> makeRecognizer(const aa::MonitorReader& reader){
             if(!reader.status.clockReferencePath.empty()){
                 if(recognizer->setClockReference(aa::loadImage(reader.status.clockReferencePath))&&assassinClock){
                     const int resource=std::abs(reader.area.iconSize-40)<std::abs(reader.area.iconSize-64)?IDR_ASSASSIN_CLOCK_40:IDR_ASSASSIN_CLOCK;
-                    recognizer->setClockFallback(aa::loadImageResource(resource));
+                    recognizer->setClockFallback(aa::loadImageResource(resource),resource==IDR_ASSASSIN_CLOCK_40);
                 }
             }else if(assassinClock){
                 const int resource=std::abs(reader.area.iconSize-40)<std::abs(reader.area.iconSize-64)?IDR_ASSASSIN_CLOCK_40:IDR_ASSASSIN_CLOCK;
-                recognizer->setClockReference(aa::loadImageResource(resource));
+                recognizer->setClockReference(aa::loadImageResource(resource),resource==IDR_ASSASSIN_CLOCK_40);
             }
         }catch(const std::exception&){recognizer->setClockReference({});}
     }
@@ -86,8 +87,27 @@ std::unique_ptr<aa::Recognizer> makeRecognizer(const aa::MonitorReader& reader){
 Screen screenOf(HWND target){
     Screen result;RECT client{};MONITORINFOEXW monitor{};monitor.cbSize=sizeof(monitor);
     if(!IsWindow(target)||!GetClientRect(target,&client)||client.right<=0||client.bottom<=0||!ClientToScreen(target,&result.origin)||
-       !GetMonitorInfoW(MonitorFromWindow(target,MONITOR_DEFAULTTONEAREST),&monitor))throw std::runtime_error("Janela indisponível. Conecte ao Albion novamente.");
+       !GetMonitorInfoW(MonitorFromWindow(target,MONITOR_DEFAULTTONULL),&monitor))throw std::runtime_error("Janela indisponível ou fora dos monitores. Conecte ao Albion novamente.");
     result.width=client.right;result.height=client.bottom;result.dpi=GetDpiForWindow(target);result.device=monitor.szDevice;return result;
+}
+std::string utf8(const std::wstring& value){
+    if(value.empty())return {};
+    const int size=WideCharToMultiByte(CP_UTF8,0,value.data(),static_cast<int>(value.size()),nullptr,0,nullptr,nullptr);
+    if(!size)throw std::runtime_error("Não foi possível codificar a mensagem de tela.");
+    std::string result(size,' ');WideCharToMultiByte(CP_UTF8,0,value.data(),static_cast<int>(value.size()),result.data(),size,nullptr,nullptr);return result;
+}
+bool matchesHudScreen(const aa::HudLayout& hud,const Screen& screen){
+    return hud.clientWidth>0&&hud.clientHeight>0&&hud.clientWidth==screen.width&&hud.clientHeight==screen.height&&
+        (!hud.monitorDpi||!screen.dpi||hud.monitorDpi==screen.dpi);
+}
+std::wstring hudScreenIssue(const aa::HudLayout& hud,const Screen& screen){
+    if(matchesHudScreen(hud,screen))return {};
+    const auto dpi=[](unsigned value){return value?std::to_wstring(value):L"desconhecido";};
+    const bool sizeChanged=hud.clientWidth!=screen.width||hud.clientHeight!=screen.height;
+    return L"HUD \""+hud.name+L"\": "+std::to_wstring(hud.clientWidth)+L" × "+std::to_wstring(hud.clientHeight)+L" px, DPI "+dpi(hud.monitorDpi)+
+        L"; jogo: "+std::to_wstring(screen.width)+L" × "+std::to_wstring(screen.height)+L" px, DPI "+dpi(screen.dpi)+
+        (sizeChanged?L". O tamanho da janela mudou; escolha ou calibre uma HUD para este tamanho.":
+            L". O DPI mudou; confira a escala do Windows ou calibre uma HUD para ela.");
 }
 App::~App(){stop();if(badge)DestroyWindow(badge);if(font)DeleteObject(font);if(titleFont)DeleteObject(titleFont);}
 void App::configureStorage(const std::filesystem::path& settingsFile){
@@ -120,9 +140,7 @@ bool App::geometryMatches()const{
     if(!target||!IsWindow(target)||IsIconic(target))return false;
     try{
         auto screen=screenOf(target);
-        for(const auto& h:workspace.huds)if(h.id==workspace.activeHudId)
-            return h.clientWidth==screen.width&&h.clientHeight==screen.height&&(!h.monitorDpi||!screen.dpi||h.monitorDpi==screen.dpi)&&
-                (h.monitorDevice.empty()||screen.device.empty()||h.monitorDevice==screen.device);
+        for(const auto& h:workspace.huds)if(h.id==workspace.activeHudId)return matchesHudScreen(h,screen);
     }catch(const std::exception&){}
     return false;
 }
@@ -144,8 +162,8 @@ void App::stop(){
     if(badge)ShowWindow(badge,SW_HIDE);
     for(auto& o:overlays)o->update(target,{},false);overlays.clear();
     if(testOverlay)testOverlay->update(target,{},false);
-    recognizers.clear();current.clear();lastReadings.clear();clocks.clear();clockPredictions.clear();lit.assign(plan.actions.size(),false);
-    {std::lock_guard lock(mutex);latest.clear();latestSource=0;latestImage={};latestError.clear();pending=false;}
+    recognizers.clear();readyReferences.clear();current.clear();currentReady.clear();lastReadings.clear();clocks.clear();clockPredictions.clear();lit.assign(plan.actions.size(),false);
+    {std::lock_guard lock(mutex);latest.clear();latestReady.clear();latestSource=0;latestImage={};latestError.clear();pending=false;}
 }
 void App::start(){
     if(selecting)return;
@@ -154,7 +172,13 @@ void App::start(){
     if((!target||!IsWindow(target))&&!connect())return;
     if(IsIconic(target))ShowWindow(target,SW_RESTORE);
     auto issues=aa::readinessIssues(workspace);
-    if(!geometryMatches())issues.insert(issues.begin(),L"A HUD não corresponde à resolução/escala atual. Escolha outra ou crie uma HUD para esta tela.");
+    try{
+        const auto screen=screenOf(target);
+        if(const auto* layout=hud()){
+            const auto mismatch=hudScreenIssue(*layout,screen);
+            if(!mismatch.empty())issues.insert(issues.begin(),mismatch);
+        }
+    }catch(const std::exception&){issues.insert(issues.begin(),L"Janela do jogo indisponível ou fora dos monitores. Conecte novamente.");}
     if(!issues.empty()){
         error=L"Antes de iniciar:\r\n";for(std::size_t i=0;i<std::min<std::size_t>(issues.size(),4);++i)error+=L"• "+issues[i]+L"\r\n";
         page=3;makeUI();return;
@@ -163,6 +187,8 @@ void App::start(){
     if(static_cast<std::int64_t>(plan.captureArea.width)*plan.captureArea.height>64000000)throw std::runtime_error("As regiões abrangem uma área grande demais. Use o jogo em um único monitor.");
     for(const auto& read:plan.readers)recognizers.push_back(read.kind==aa::MonitorReaderKind::Status?makeRecognizer(read):nullptr);
     for(const auto& action:plan.actions){
+        if(action.rule.onlyWhenReady&&showOverlayInCapture)
+            throw std::runtime_error("Desative 'Incluir overlay no compartilhamento' para ler a habilidade sem interferência do próprio destaque.");
         if(showOverlayInCapture){
             const auto padding=aa::overlayEffectPadding(action.rule.effect,action.target.width,action.target.height,action.target.shape);
             RECT destination=rect(action.target);InflateRect(&destination,padding,padding);
@@ -170,12 +196,23 @@ void App::start(){
         }
         auto overlay=std::make_unique<Overlay>();overlay->setCaptureVisible(showOverlayInCapture);overlay->initialize(instance);
         overlay->setColor(action.rule.triggers.empty()?action.rule.condition.color:action.rule.action.color);overlay->setEffect(action.rule.effect);overlay->setShape(action.target.shape);overlays.push_back(std::move(overlay));
+        aa::Image reference;
+        if(action.rule.onlyWhenReady){
+            const auto* layout=hud();
+            const auto found=std::find_if(layout->areas.begin(),layout->areas.end(),[&](const auto& area){return aa::sameName(area.name,action.rule.targetArea);});
+            if(found==layout->areas.end())throw std::runtime_error("Área de habilidade não encontrada na HUD.");
+            reference=aa::loadImage(found->readyReferencePath);
+            if(!reference.valid()||reference.width!=action.target.width||reference.height!=action.target.height)
+                throw std::runtime_error("Imagem de habilidade incompatível com a área. Capture-a novamente na HUD.");
+        }
+        readyReferences.push_back(std::move(reference));
     }
     current.resize(plan.readers.size());lit.assign(plan.actions.size(),false);running=true;const auto runSource=++source;
     error.clear();page=3;makeUI();SetForegroundWindow(target);
     try{
         capture.start(target,rect(plan.captureArea),[this,runSource](aa::CaptureFrame frame){
             std::vector<aa::Observation> batch(plan.readers.size());std::wstring failure=widen(frame.error);
+            std::vector<bool> readyBatch(plan.actions.size(),false);
             for(std::size_t i=0;i<plan.readers.size();++i){
                 batch[i].source=runSource;batch[i].capturedMs=frame.capturedMs;
                 if(!frame.available)continue;
@@ -185,13 +222,18 @@ void App::start(){
                     else batch[i].detection=recognizers[i]->recognizeNearSize(image,plan.readers[i].area.iconSize,roi.shape);
                 }catch(const std::exception& e){failure=widen(e.what());}
             }
-            {std::lock_guard lock(mutex);latest=std::move(batch);latestSource=runSource;latestImage=std::move(frame.image);latestError=std::move(failure);}
+            if(frame.available)for(std::size_t i=0;i<plan.actions.size();++i)if(plan.actions[i].rule.onlyWhenReady){
+                try{auto roi=plan.actions[i].target;roi.x-=plan.captureArea.x;roi.y-=plan.captureArea.y;
+                    readyBatch[i]=aa::skillReady(aa::cropImage(frame.image,roi),readyReferences[i],roi.shape);
+                }catch(const std::exception& e){failure=widen(e.what());}
+            }
+            {std::lock_guard lock(mutex);latest=std::move(batch);latestReady=std::move(readyBatch);latestSource=runSource;latestImage=std::move(frame.image);latestError=std::move(failure);}
             if(!pending.exchange(true)&&!PostMessageW(window,ResultMessage,0,0))pending=false;
         });
     }catch(...){stop();throw;}
 }
 void App::consume(){
-    {std::lock_guard lock(mutex);pending=false;if(!running||latestSource!=source)return;current=latest;if(latestImage.valid())capturePreview=std::move(latestImage);error=latestError;}
+    {std::lock_guard lock(mutex);pending=false;if(!running||latestSource!=source)return;current=latest;currentReady=latestReady;if(latestImage.valid())capturePreview=std::move(latestImage);error=latestError;}
     // Histórico somente informativo: evaluateMonitor continua recebendo current.
     if(!current.empty()&&std::all_of(current.begin(),current.end(),[this](const auto& observation){
         return observation.source==source&&observation.capturedMs>0;
@@ -208,7 +250,10 @@ std::vector<std::optional<float>> App::evaluateReadings(std::int64_t now,bool ta
             clockPredictions[i]=clocks[i].update(current[i],now,workspace.validityMs,source);
             predicted[i].detection.remainingFraction=clockPredictions[i].fraction;
         }
-        lit=aa::evaluateMonitor(plan,predicted,now,workspace.validityMs,source,&remaining);
+        auto ready=currentReady;
+        const auto captured=current.front().capturedMs;
+        if(captured<=0||captured>now||now-captured>std::min(workspace.validityMs,250))ready.assign(plan.actions.size(),false);
+        lit=aa::evaluateMonitor(plan,predicted,now,workspace.validityMs,source,&remaining,&ready);
     }else{
         clocks.clear();lit.assign(plan.actions.size(),false);
     }
@@ -310,6 +355,26 @@ void App::calibrateHealth(){
     saved->areas[static_cast<std::size_t>(selectedArea)].healthCalibration=calibration;
     commit(std::move(changed));error=L"Vida cheia calibrada. A condição passará a ler o percentual desta área.";
 }
+void App::captureReadySkill(){
+    if(selecting)return;
+    saveEditor();stop();
+    if((!target||!IsWindow(target))&&!connect())return;
+    const auto* selected=area();const auto* layout=hud();
+    if(!selected||!layout||!fits(selected->region,layout->clientWidth,layout->clientHeight)||
+        selected->region.width<24||selected->region.height<24||selected->region.width>256||selected->region.height>256||!geometryMatches())
+        throw std::runtime_error("Selecione uma habilidade de 24 a 256 pixels na HUD atual.");
+    aa::Image image;
+    {
+        CapturePanelGuard restore(*this);
+        image=captureOnce(target,rect(selected->region));
+        if(!geometryMatches()||GetForegroundWindow()!=target)
+            throw std::runtime_error("A tela mudou durante a captura. A imagem anterior foi mantida.");
+    }
+    auto changed=workspace;
+    for(auto& layoutValue:changed.huds)if(layoutValue.id==changed.activeHudId)
+        {auto& stored=layoutValue.areas.at(static_cast<std::size_t>(selectedArea));stored.readyReferencePath=storeImage(L"skill",image);stored.readyConfirmed=false;}
+    commit(std::move(changed));error=L"Imagem salva. Confirme que a habilidade estava fora do cooldown ao capturar.";
+}
 std::optional<PickedImage> App::pick(aa::SelectionKind kind,const aa::Recognizer* reference,aa::RegionShape shape){
     if(selecting)return std::nullopt;stop();if((!target||!IsWindow(target))&&!connect())return std::nullopt;
     if(IsIconic(target))ShowWindow(target,SW_RESTORE);const auto before=screenOf(target);
@@ -318,7 +383,8 @@ std::optional<PickedImage> App::pick(aa::SelectionKind kind,const aa::Recognizer
         auto snapshot=captureOnce(target,{0,0,before.width,before.height});
         auto chosen=aa::selectRegion(window,target,snapshot,before.origin,kind,reference,shape);std::optional<PickedImage> result;
         if(chosen){const auto after=screenOf(target);
-            if(after.width!=before.width||after.height!=before.height||after.dpi!=before.dpi||after.device!=before.device)throw std::runtime_error("A tela mudou durante a seleção. Tente novamente.");
+            if(after.width!=before.width||after.height!=before.height||after.dpi!=before.dpi||after.origin.x!=before.origin.x||after.origin.y!=before.origin.y)
+                throw std::runtime_error("O tamanho, a escala ou a posição da janela mudou durante a seleção. Tente novamente.");
             if(!fits(*chosen,before.width,before.height))throw std::runtime_error("A região selecionada está fora da janela.");
             result=PickedImage{*chosen,aa::cropImage(snapshot,*chosen),before};}
         return result;

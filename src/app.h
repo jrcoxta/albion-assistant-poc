@@ -25,14 +25,17 @@ enum Id {
     SampleValue, CaptureStack, StackList, DeleteStack, AddPreset,
     SetList, SetName, NewSet, DeleteSet, RuleList, RuleName, NewRule, DeleteRule,
     RuleStatus, SourceArea, TargetArea, ConditionBox, Stacks, EffectBox, Color, Enabled,
-    MoveRuleUp, MoveRuleDown, RenameRule, RenameArea, RenameStatus, RenameSet, TriggerList, NewTrigger, DeleteTrigger, Validity, SampleColor, FollowClock, CaptureClock, ClockHint, ShareOverlay, CaptureRuleStack, DeleteRuleStack, CalibrateHealth, TriggerKindBox, HealthArea, HealthComparisonBox, HealthPercent, Tab0=250
+    MoveRuleUp, MoveRuleDown, RenameRule, RenameArea, RenameStatus, RenameSet, TriggerList, NewTrigger, DeleteTrigger, Validity, SampleColor, FollowClock, CaptureClock, ClockHint, ShareOverlay, CaptureRuleStack, DeleteRuleStack, CalibrateHealth, TriggerKindBox, HealthArea, HealthComparisonBox, HealthPercent, CaptureReadySkill, OnlyWhenReady, ConfirmReadySkill, Tab0=250
 };
 std::wstring widen(const std::string& value);
+std::string utf8(const std::wstring& value);
 std::wstring text(HWND window);
 RECT rect(aa::Region area);
 bool fits(aa::Region area, int width, int height);
 struct Screen { int width=0,height=0; unsigned dpi=0; std::wstring device; POINT origin{}; };
 Screen screenOf(HWND target);
+bool matchesHudScreen(const aa::HudLayout& hud, const Screen& screen);
+std::wstring hudScreenIssue(const aa::HudLayout& hud, const Screen& screen);
 struct PickedImage { aa::Region area; aa::Image image; Screen screen; };
 std::unique_ptr<aa::Recognizer> makeRecognizer(const aa::MonitorReader& reader);
 
@@ -50,12 +53,15 @@ struct App {
     std::wstring error=L"Conecte ao jogo. Escolha uma HUD e um set para iniciar.", hotkeyWarning;
     std::vector<HWND> controls;
     aa::Image capturePreview, referencePreview;
+    aa::Image skillPreview;
     aa::DesktopCapture capture;
     aa::MonitorPlan plan;
     std::vector<std::unique_ptr<aa::Recognizer>> recognizers;
+    std::vector<aa::Image> readyReferences;
     std::vector<std::unique_ptr<Overlay>> overlays;
     std::unique_ptr<Overlay> testOverlay;
     std::vector<aa::Observation> current, latest, lastReadings;
+    std::vector<bool> currentReady, latestReady;
     std::vector<aa::PredictiveClock> clocks;
     std::vector<aa::ClockPrediction> clockPredictions;
     std::vector<bool> lit;
@@ -106,6 +112,7 @@ struct App {
     void testAction();
     void sampleActionColor(const std::function<aa::Image(HWND,RECT)>& captureFrame={});
     void calibrateHealth();
+    void captureReadySkill();
     bool applyActionColor(const aa::Image& image);
     void applyClockReference(const aa::Image& image);
     std::optional<PickedImage> pick(aa::SelectionKind kind, const aa::Recognizer* reference=nullptr,

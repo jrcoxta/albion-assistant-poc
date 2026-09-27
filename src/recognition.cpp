@@ -57,7 +57,7 @@ float digitScore(const Image& roi,Region icon,const Image& reference) {
     }
     return best;
 }
-std::optional<float> radialRemaining(const Image& image,Region icon,const Image& reference) {
+std::optional<float> radialRemaining(const Image& image,Region icon,const Image& reference,float maxFitError) {
     if(!reference.valid()) return {};
     struct Point { int x,y; float angle; const std::uint8_t* reference; };
     std::vector<Point> points;
@@ -141,7 +141,7 @@ std::optional<float> radialRemaining(const Image& image,Region icon,const Image&
         errors[angle]=error;
         if(error<bestError) { bestError=error; bestAngle=angle; }
     }
-    if(bestError>.075f || bestAngle<15 || bestAngle>345) return {};
+    if(bestError>maxFitError || bestAngle<15 || bestAngle>345) return {};
     int first=bestAngle,last=bestAngle;
     for(int angle=1;angle<360;++angle) if(errors[angle]<=bestError+.012f) { first=std::min(first,angle); last=std::max(last,angle); }
     if(last-first>16) return {};
@@ -183,22 +183,27 @@ void Recognizer::setReference(const Image& image) {
     clearStackReferences();
     clockReference_={};
     clockFallback_={};
+    nativeClockReference_=nativeClockFallback_=false;
     if(validReference(image)) references_.push_back(image);
 }
 void Recognizer::clearStackReferences() {
     stackReferences_.clear();
 }
-bool Recognizer::setClockReference(const Image& image) {
+bool Recognizer::setClockReference(const Image& image,bool nativeAssassin) {
     clockReference_={};
     clockFallback_={};
+    nativeClockReference_=nativeClockFallback_=false;
     if(!validReference(image) || image.width!=image.height) return false;
     clockReference_=image;
+    nativeClockReference_=nativeAssassin;
     return true;
 }
-bool Recognizer::setClockFallback(const Image& image) {
+bool Recognizer::setClockFallback(const Image& image,bool nativeAssassin) {
     clockFallback_={};
+    nativeClockFallback_=false;
     if(!clockReady() || !validReference(image) || image.width!=image.height) return false;
     clockFallback_=image;
+    nativeClockFallback_=nativeAssassin;
     return true;
 }
 bool Recognizer::clockReady() const { return clockReference_.valid(); }
@@ -366,8 +371,9 @@ Detection Recognizer::recognize(const Image& image,int iconSize,RegionShape sear
     out.presence=Presence::Present;
     out.icon={best.x,best.y,iconSize,iconSize};
     if(clockReady()) {
-        out.remainingFraction=radialRemaining(image,out.icon,clockReference_);
-        if(!out.remainingFraction&&clockFallback_.valid())out.remainingFraction=radialRemaining(image,out.icon,clockFallback_);
+        out.remainingFraction=radialRemaining(image,out.icon,clockReference_,nativeClockReference_?.115f:.075f);
+        if(!out.remainingFraction&&clockFallback_.valid())
+            out.remainingFraction=radialRemaining(image,out.icon,clockFallback_,nativeClockFallback_?.115f:.075f);
     }
     out.stacks=readStacks(image,out.icon);
     out.detail=out.stacks?"Buff e contador reconhecidos":"Buff presente; contador desconhecido";

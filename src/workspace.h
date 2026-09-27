@@ -11,10 +11,14 @@ struct HudArea {
     int iconSize = 48;
     bool iconCalibrated = false;
     HealthCalibration healthCalibration;
+    std::wstring readyReferencePath;
+    bool readyConfirmed = false;
     void replaceRegion(Region selected) {
         region = selected;
         iconCalibrated = false;
         healthCalibration = {};
+        readyReferencePath.clear();
+        readyConfirmed = false;
     }
 };
 struct HudLayout {
@@ -50,6 +54,7 @@ struct StatusRule {
     Rule action;
     OverlayEffect effect = OverlayEffect::Border;
     bool followClock = false;
+    bool onlyWhenReady = false;
     std::vector<RuleTrigger> triggers;
 
     // Compatibility fields for schema 1/2 data and old editor code.

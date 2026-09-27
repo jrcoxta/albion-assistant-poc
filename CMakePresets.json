@@ -4,7 +4,8 @@
     {
       "name": "windows-release",
       "displayName": "Windows x64 — Release",
-      "generator": "Ninja",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
       "binaryDir": "${sourceDir}/build/release",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "BUILD_TESTING": true }
     },
@@ -17,11 +18,11 @@
     }
   ],
   "buildPresets": [
-    { "name": "windows-release", "configurePreset": "windows-release" },
-    { "name": "windows-debug", "configurePreset": "windows-debug" }
+    { "name": "windows-release", "configurePreset": "windows-release", "configuration": "Release" },
+    { "name": "windows-debug", "configurePreset": "windows-debug", "configuration": "Debug" }
   ],
   "testPresets": [
-    { "name": "windows-release", "configurePreset": "windows-release", "output": { "outputOnFailure": true } },
-    { "name": "windows-debug", "configurePreset": "windows-debug", "output": { "outputOnFailure": true } }
+    { "name": "windows-release", "configurePreset": "windows-release", "configuration": "Release", "output": { "outputOnFailure": true } },
+    { "name": "windows-debug", "configurePreset": "windows-debug", "configuration": "Debug", "output": { "outputOnFailure": true } }
   ]
 }

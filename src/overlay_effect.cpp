@@ -6,6 +6,71 @@
 #include <numbers>
 
 namespace aa {
+namespace {
+void overPixel(Image& image, int x, int y, unsigned red, unsigned green, unsigned blue, double coverage) {
+    if (x < 0 || y < 0 || x >= image.width || y >= image.height) return;
+    const unsigned alpha = static_cast<unsigned>(std::lround(std::clamp(coverage, 0.0, 1.0) * 255));
+    if (!alpha) return;
+    const auto i = (static_cast<std::size_t>(y) * image.width + x) * 4;
+    image.bgra[i] = static_cast<std::uint8_t>((blue * alpha + image.bgra[i] * (255 - alpha) + 127) / 255);
+    image.bgra[i + 1] = static_cast<std::uint8_t>((green * alpha + image.bgra[i + 1] * (255 - alpha) + 127) / 255);
+    image.bgra[i + 2] = static_cast<std::uint8_t>((red * alpha + image.bgra[i + 2] * (255 - alpha) + 127) / 255);
+    image.bgra[i + 3] = static_cast<std::uint8_t>(alpha + (image.bgra[i + 3] * (255 - alpha) + 127) / 255);
+}
+
+void drawSparks(Image& image, int iconWidth, int iconHeight, int padding, RegionShape shape,
+                unsigned red, unsigned green, unsigned blue, double cycle) {
+    constexpr int count = 20;
+    const double halfWidth = iconWidth / 2.0, halfHeight = iconHeight / 2.0;
+    for (int n = 0; n < count; ++n) {
+        const double position = std::fmod((n + 0.31 * (n % 3)) / count + cycle * (1.0 + n % 3), 1.0);
+        const double drift = 6.0 + 15.0 * (0.5 + 0.5 * std::sin(2.0 * std::numbers::pi * (cycle * (2 + n % 2) + n * 0.37)));
+        double px = 0, py = 0, nx = 0, ny = 0;
+        if (shape == RegionShape::Circle) {
+            const double angle = 2.0 * std::numbers::pi * position;
+            nx = std::sin(angle); ny = -std::cos(angle);
+            px = padding + halfWidth + nx * (halfWidth + drift);
+            py = padding + halfHeight + ny * (halfHeight + drift);
+        } else {
+            // Seguir os cantos arredondados do próprio raster evita teletransporte ao trocar a normal.
+            const double r = std::min({5.0, halfWidth, halfHeight});
+            const double horizontal = iconWidth - 2.0 * r, vertical = iconHeight - 2.0 * r;
+            const double arc = r * std::numbers::pi / 2.0;
+            const double perimeter = 2.0 * (horizontal + vertical + 2.0 * arc);
+            double along = position * perimeter;
+            const auto corner = [&](double centerX, double centerY, double angle) {
+                nx = std::cos(angle); ny = std::sin(angle);
+                px = centerX + nx * r; py = centerY + ny * r;
+            };
+            if (along < horizontal) { px = r + along; ny = -1; }
+            else if ((along -= horizontal) < arc)
+                corner(iconWidth - r, r, -std::numbers::pi / 2.0 + along / r);
+            else if ((along -= arc) < vertical) { px = iconWidth; py = r + along; nx = 1; }
+            else if ((along -= vertical) < arc)
+                corner(iconWidth - r, iconHeight - r, along / r);
+            else if ((along -= arc) < horizontal) { px = iconWidth - r - along; py = iconHeight; ny = 1; }
+            else if ((along -= horizontal) < arc)
+                corner(r, iconHeight - r, std::numbers::pi / 2.0 + along / r);
+            else if ((along -= arc) < vertical) { py = iconHeight - r - along; nx = -1; }
+            else { along -= vertical; corner(r, r, std::numbers::pi + along / r); }
+            px += padding + nx * drift; py += padding + ny * drift;
+        }
+        const double radius = 2.2 + n % 3 * 0.45;
+        const int left = std::max(0, static_cast<int>(std::floor(px - 7)));
+        const int right = std::min(image.width - 1, static_cast<int>(std::ceil(px + 7)));
+        const int top = std::max(0, static_cast<int>(std::floor(py - 7)));
+        const int bottom = std::min(image.height - 1, static_cast<int>(std::ceil(py + 7)));
+        for (int y = top; y <= bottom; ++y) for (int x = left; x <= right; ++x) {
+            const double distance = std::hypot(x + 0.5 - px, y + 0.5 - py);
+            const double halo = 0.31 * std::exp(-0.5 * distance * distance / 8.0);
+            const double core = 0.73 * std::exp(-0.5 * distance * distance / (radius * radius));
+            overPixel(image, x, y, red, green, blue, halo);
+            overPixel(image, x, y, (red + 255) / 2, (green + 255) / 2, (blue + 255) / 2, core);
+        }
+    }
+}
+}
+
 int overlayEffectPadding(OverlayEffect effect, int iconWidth, int iconHeight, RegionShape shape) {
     if (iconWidth <= 0 || iconHeight <= 0 || iconWidth > 16384 || iconHeight > 16384 ||
         (shape != RegionShape::Rectangle && shape != RegionShape::Circle) ||
@@ -15,12 +80,13 @@ int overlayEffectPadding(OverlayEffect effect, int iconWidth, int iconHeight, Re
     case OverlayEffect::Glow:
     case OverlayEffect::Pulse: return 24;
     case OverlayEffect::Halo: return 16;
+    case OverlayEffect::Flames: return 32;
     }
     return 0;
 }
 
 Image renderOverlayEffect(int iconWidth, int iconHeight, OverlayEffect effect, std::uint32_t color, RegionShape shape,
-                          std::optional<float> remaining) {
+                           std::optional<float> remaining, std::uint64_t elapsedMs) {
     const int padding = overlayEffectPadding(effect, iconWidth, iconHeight, shape);
     if (!padding) return {};
     const int width = iconWidth + 2 * padding, height = iconHeight + 2 * padding;
@@ -29,17 +95,40 @@ Image renderOverlayEffect(int iconWidth, int iconHeight, OverlayEffect effect, s
     const double halfWidth = iconWidth / 2.0, halfHeight = iconHeight / 2.0;
     const double radius = std::min({5.0, halfWidth, halfHeight});
     const bool aura = effect == OverlayEffect::Glow || effect == OverlayEffect::Pulse;
+    const bool flames = effect == OverlayEffect::Flames;
+    const double cycle = (elapsedMs % 3200) / 3200.0;
     const unsigned red = color & 255u, green = (color >> 8) & 255u, blue = (color >> 16) & 255u;
     for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x) {
         const double dx = std::abs(x + 0.5 - padding - halfWidth);
         const double dy = std::abs(y + 0.5 - padding - halfHeight);
+        if (flames) {
+            // O centro e os pixels além das chamas não precisam da distância nem de trigonometria.
+            if (shape == RegionShape::Circle) {
+                const double radiusSquared = dx * dx + dy * dy;
+                if (radiusSquared < halfWidth * halfWidth ||
+                    radiusSquared > (halfWidth + 29) * (halfWidth + 29)) continue;
+            } else if ((dx < halfWidth - 5 && dy < halfHeight - 5) ||
+                       dx > halfWidth + 29 || dy > halfHeight + 29) continue;
+        }
         const double qx = dx - (halfWidth - radius), qy = dy - (halfHeight - radius);
         const double distance = shape == RegionShape::Circle ? std::hypot(dx, dy) - halfWidth :
             std::hypot(std::max(qx, 0.0), std::max(qy, 0.0)) + std::min(std::max(qx, qy), 0.0) - radius;
         // Contornos preservam o interior; somente a aura ilumina por cima da habilidade.
         if (!aura && distance < 0) continue;
         double intensity = 0;
-        if (effect == OverlayEffect::Halo) {
+        if (flames) {
+            if (distance > 29.0) continue;
+            // Ondas fecham o ciclo em 3,2 s; as línguas se deslocam ao longo do contorno.
+            const double angle = std::atan2((x + 0.5 - padding - halfWidth) / halfWidth,
+                                            -(y + 0.5 - padding - halfHeight) / halfHeight);
+            const double phase = angle - cycle * 2.0 * std::numbers::pi;
+            const double tongue = std::pow(std::max(0.0, std::sin(13.0 * phase)), 3.0);
+            const double secondary = std::pow(std::max(0.0, std::sin(21.0 * angle + cycle * 4.0 * std::numbers::pi)), 4.0);
+            const double reach = 8.0 + 13.0 * tongue + 7.0 * secondary;
+            const double edge = std::clamp((reach - distance) / 3.0, 0.0, 1.0);
+            intensity = 0.72 * std::exp(-0.5 * distance * distance / 16.0) +
+                        0.43 * edge * std::exp(-distance / 13.0) * (0.28 + 0.72 * tongue);
+        } else if (effect == OverlayEffect::Halo) {
             const double ring = distance - 3.0;
             if (std::abs(ring) < 11.0)
                 intensity = 0.72 * std::exp(-0.5 * ring * ring / (3.8 * 3.8)) +
@@ -60,6 +149,7 @@ Image renderOverlayEffect(int iconWidth, int iconHeight, OverlayEffect effect, s
         image.bgra[i + 2] = static_cast<std::uint8_t>((red * alpha + 127) / 255);
         image.bgra[i + 3] = static_cast<std::uint8_t>(alpha);
     }
+    if (flames) drawSparks(image, iconWidth, iconHeight, padding, shape, red, green, blue, cycle);
     if (!remaining || !std::isfinite(*remaining) || *remaining <= 0 || *remaining > 1) return image;
     const double clearedAngle = (1.0 - *remaining) * 2.0 * std::numbers::pi;
     // Aro sobre o perímetro; retângulos usam a elipse inscrita. O centro e a aura ficam preservados.
@@ -75,18 +165,10 @@ Image renderOverlayEffect(int iconWidth, int iconHeight, OverlayEffect effect, s
         double angle = std::atan2(nx, -ny);
         if (angle < 0) angle += 2.0 * std::numbers::pi;
         if (angle < clearedAngle) continue;
-        const auto i = (static_cast<std::size_t>(y) * width + x) * 4;
-        const auto over = [&](unsigned r, unsigned g, unsigned b, double coverage) {
-            const unsigned alpha = static_cast<unsigned>(std::lround(coverage * 255));
-            image.bgra[i] = static_cast<std::uint8_t>((b * alpha + image.bgra[i] * (255 - alpha) + 127) / 255);
-            image.bgra[i + 1] = static_cast<std::uint8_t>((g * alpha + image.bgra[i + 1] * (255 - alpha) + 127) / 255);
-            image.bgra[i + 2] = static_cast<std::uint8_t>((r * alpha + image.bgra[i + 2] * (255 - alpha) + 127) / 255);
-            image.bgra[i + 3] = static_cast<std::uint8_t>(alpha + (image.bgra[i + 3] * (255 - alpha) + 127) / 255);
-        };
         // Contraste escuro e cor levemente iluminada deixam o relógio legível sobre a aura.
-        over(0, 0, 0, 0.9 * std::clamp(3.0 - distance, 0.0, 1.0));
-        over((3 * red + 255) / 4, (3 * green + 255) / 4, (3 * blue + 255) / 4,
-             std::clamp(1.8 - distance, 0.0, 1.0));
+        overPixel(image, x, y, 0, 0, 0, 0.9 * std::clamp(3.0 - distance, 0.0, 1.0));
+        overPixel(image, x, y, (3 * red + 255) / 4, (3 * green + 255) / 4, (3 * blue + 255) / 4,
+                  std::clamp(1.8 - distance, 0.0, 1.0));
     }
     return image;
 }

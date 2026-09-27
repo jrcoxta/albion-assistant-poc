@@ -82,6 +82,8 @@ void validate(const Workspace& w) {
         Names areas;
         for (const auto& area : hud.areas) {
             nameValid(area.name); require(areas.insert(area.name).second, "Nome de regiao duplicado na HUD.");
+            textValid(area.readyReferencePath);
+            require(!area.readyConfirmed || !area.readyReferencePath.empty(), "Confirmacao de habilidade sem imagem.");
             require(area.region.shape == RegionShape::Rectangle || area.region.shape == RegionShape::Circle, "Formato de regiao invalido.");
             require(emptyRegion(area.region) || inBounds(hud, area.region), "Regiao fora das dimensoes da HUD.");
             require(area.iconSize >= 24 && area.iconSize <= 256, "Escala do icone invalida.");
@@ -115,7 +117,7 @@ void validate(const Workspace& w) {
                     rule.condition.condition == Condition::Absent, "Condicao de regra invalida.");
             require(rule.condition.stacks >= 1 && rule.condition.stacks <= 99 && rule.condition.color <= 0xFFFFFF,
                     "Stacks ou cor da regra invalidos.");
-            require(rule.effect >= OverlayEffect::Border && rule.effect <= OverlayEffect::Halo, "Efeito de regra invalido.");
+            require(rule.effect >= OverlayEffect::Border && rule.effect <= OverlayEffect::Flames, "Efeito de regra invalido.");
             textValid(rule.clockReferencePath);
             require(rule.stackSamples.size() <= 99, "Limite de 99 amostras de stacks excedido.");
             std::set<unsigned> samples;
@@ -216,8 +218,8 @@ std::wstring indexed(const std::wstring& prefix, std::size_t index) { return pre
 
 Workspace readWorkspace(const std::filesystem::path& file) {
     IniReader in(file);
-    const auto schema=in.number(L"workspace", L"schema", 4);
-    require(schema>=1&&schema<=4, "Schema de workspace nao suportado.");
+    const auto schema=in.number(L"workspace", L"schema", 5);
+    require(schema>=1&&schema<=5, "Schema de workspace nao suportado.");
     Workspace w;
     w.nextId = in.number(L"workspace", L"nextId", std::numeric_limits<unsigned>::max());
     w.validityMs = static_cast<int>(in.number(L"workspace", L"validityMs", 60000));
@@ -251,6 +253,8 @@ Workspace readWorkspace(const std::filesystem::path& file) {
                 a.healthCalibration.green = static_cast<std::uint8_t>(in.number(child, L"healthGreen", 255));
                 a.healthCalibration.blue = static_cast<std::uint8_t>(in.number(child, L"healthBlue", 255));
             }
+            if (schema >= 5) a.readyReferencePath = in.text(child, L"readyReferencePath");
+            if (schema >= 5 && in.contains(child, L"readyConfirmed")) a.readyConfirmed = in.number(child, L"readyConfirmed", 1) != 0;
             h.areas.push_back(std::move(a));
         }
         w.huds.push_back(std::move(h));
@@ -287,9 +291,10 @@ Workspace readWorkspace(const std::filesystem::path& file) {
             r.condition.condition = static_cast<Condition>(in.number(child, L"condition", 2));
             r.condition.stacks = in.number(child, L"stacks", 99); r.condition.color = in.number(child, L"color", 0xFFFFFF);
             const bool legacyGlow = in.number(child, L"glow", 1) != 0;
-            r.effect = in.contains(child, L"effect") ? static_cast<OverlayEffect>(in.number(child, L"effect", 3)) :
+            r.effect = in.contains(child, L"effect") ? static_cast<OverlayEffect>(in.number(child, L"effect", 4)) :
                 (legacyGlow ? OverlayEffect::Glow : OverlayEffect::Border);
             if (in.contains(child, L"followClock")) r.followClock = in.number(child, L"followClock", 1) != 0;
+            if (schema >= 5) r.onlyWhenReady = in.number(child, L"onlyWhenReady", 1) != 0;
             if(schema>=2) {
                 r.clockReferencePath=in.text(child,L"clockReferencePath");
                 const auto samples=in.number(child,L"stackCount",99);
@@ -474,8 +479,10 @@ void saveWorkspace(const std::filesystem::path& file, const Workspace& w) {
         const bool composite=std::any_of(w.sets.begin(),w.sets.end(),[](const auto& profile){return std::any_of(profile.rules.begin(),profile.rules.end(),[](const auto& rule){return rule.triggers.size()>1;});});
         const bool health=std::any_of(w.huds.begin(),w.huds.end(),[](const auto& hud){return std::any_of(hud.areas.begin(),hud.areas.end(),[](const auto& area){return area.healthCalibration.valid();});}) ||
             std::any_of(w.sets.begin(),w.sets.end(),[](const auto& profile){return std::any_of(profile.rules.begin(),profile.rules.end(),[](const auto& rule){return std::any_of(rule.triggers.begin(),rule.triggers.end(),[](const auto& trigger){return trigger.kind==TriggerKind::Health;});});});
-        const bool triggerSchema=composite||health;
-        number(L"workspace", L"schema", health?4:(composite?3:2)); number(L"workspace", L"nextId", w.nextId);
+        const bool ready=std::any_of(w.huds.begin(),w.huds.end(),[](const auto& hud){return std::any_of(hud.areas.begin(),hud.areas.end(),[](const auto& area){return !area.readyReferencePath.empty();});}) ||
+            std::any_of(w.sets.begin(),w.sets.end(),[](const auto& profile){return std::any_of(profile.rules.begin(),profile.rules.end(),[](const auto& rule){return rule.onlyWhenReady;});});
+        const bool triggerSchema=composite||health||ready;
+        number(L"workspace", L"schema", ready?5:(health?4:(composite?3:2))); number(L"workspace", L"nextId", w.nextId);
         number(L"workspace", L"validityMs", w.validityMs); number(L"workspace", L"shareOverlayInCapture", w.shareOverlayInCapture ? 1 : 0); text(L"workspace", L"activeHudId", w.activeHudId); text(L"workspace", L"activeSetId", w.activeSetId);
         number(L"workspace", L"hudCount", w.huds.size()); number(L"workspace", L"statusCount", w.statuses.size()); number(L"workspace", L"setCount", w.sets.size());
         for (std::size_t i = 0; i < w.huds.size(); ++i) {
@@ -489,7 +496,9 @@ void saveWorkspace(const std::filesystem::path& file, const Workspace& w) {
                 number(child, L"width", a.region.width); number(child, L"height", a.region.height);
                 number(child, L"shape", static_cast<int>(a.region.shape));
                 number(child, L"iconSize", a.iconSize); number(child, L"iconCalibrated", a.iconCalibrated ? 1 : 0);
-                if (health) { number(child,L"healthCalibrated",a.healthCalibration.valid()?1:0); if(a.healthCalibration.valid()) {
+                if (ready) text(child, L"readyReferencePath", a.readyReferencePath);
+                if (ready) number(child, L"readyConfirmed", a.readyConfirmed ? 1 : 0);
+                if (health||ready) { number(child,L"healthCalibrated",a.healthCalibration.valid()?1:0); if(a.healthCalibration.valid()) {
                     number(child,L"healthX",a.healthCalibration.x);number(child,L"healthY",a.healthCalibration.y);
                     number(child,L"healthWidth",a.healthCalibration.width);number(child,L"healthHeight",a.healthCalibration.height);
                     number(child,L"healthRed",a.healthCalibration.red);number(child,L"healthGreen",a.healthCalibration.green);number(child,L"healthBlue",a.healthCalibration.blue); } }
@@ -512,6 +521,7 @@ void saveWorkspace(const std::filesystem::path& file, const Workspace& w) {
                 number(child, L"glow", r.effect == OverlayEffect::Border ? 0 : 1);
                 number(child, L"effect", static_cast<int>(r.effect));
                 number(child, L"followClock", r.followClock ? 1 : 0);
+                if (ready) number(child, L"onlyWhenReady", r.onlyWhenReady ? 1 : 0);
                 text(child,L"clockReferencePath",r.clockReferencePath);number(child,L"stackCount",r.stackSamples.size());
                 for(std::size_t k=0;k<r.stackSamples.size();++k){
                     const auto sample=indexed(child+L".stack",k);
@@ -523,7 +533,7 @@ void saveWorkspace(const std::filesystem::path& file, const Workspace& w) {
                     for(std::size_t k=0;k<triggers.size();++k){const auto triggerSection=indexed(child+L".trigger",k);const auto& t=triggers[k];
                         text(triggerSection,L"id",t.id);text(triggerSection,L"statusId",t.statusId);text(triggerSection,L"sourceArea",t.sourceArea);number(triggerSection,L"condition",static_cast<int>(t.condition.condition));number(triggerSection,L"stacks",t.condition.stacks);text(triggerSection,L"clockReferencePath",t.clockReferencePath);number(triggerSection,L"stackCount",t.stackSamples.size());
                         for(std::size_t n=0;n<t.stackSamples.size();++n){const auto sample=indexed(triggerSection+L".stack",n);number(sample,L"value",t.stackSamples[n].value);text(sample,L"path",t.stackSamples[n].path);}
-                        if(health){number(triggerSection,L"kind",static_cast<int>(t.kind));text(triggerSection,L"healthArea",t.healthArea);number(triggerSection,L"healthComparison",static_cast<int>(t.healthComparison));number(triggerSection,L"healthPercent",t.healthPercent);}}
+                         if(health||ready){number(triggerSection,L"kind",static_cast<int>(t.kind));text(triggerSection,L"healthArea",t.healthArea);number(triggerSection,L"healthComparison",static_cast<int>(t.healthComparison));number(triggerSection,L"healthPercent",t.healthPercent);}}
                 }
             }
         }
@@ -576,6 +586,9 @@ std::vector<std::wstring> readinessIssues(const Workspace& w) {
         const auto prefix=L"Regra "+std::to_wstring(i+1)+L" ("+action.name+L"): ";const auto issue=[&](const std::wstring& value){issues.push_back(prefix+value);};
         const auto area=[&](const std::wstring& name)->const HudArea*{if(!hud)return nullptr;const auto found=std::find_if(hud->areas.begin(),hud->areas.end(),[&](const auto& a){return sameName(a.name,name);});return found==hud->areas.end()?nullptr:&*found;};
         const auto* target=area(rule.targetArea);if(!target)issue(L"regiao de destino inexistente: "+rule.targetArea);else if(!inBounds(*hud,target->region))issue(L"regiao de destino nao esta calibrada dentro da HUD.");
+        if(rule.onlyWhenReady&&target&&(!target->readyConfirmed||!exists(target->readyReferencePath)||target->region.width<24||target->region.height<24||
+            target->region.width>256||target->region.height>256))
+            issue(L"capture a habilidade pronta na area de destino \""+target->name+L"\" desta HUD.");
         std::vector<RuleTrigger> fallback;if(rule.triggers.empty())fallback={{L"legacy-"+rule.id,rule.statusId,rule.sourceArea,rule.condition,rule.stackSamples,rule.clockReferencePath}};
         const auto& triggers=rule.triggers.empty()?fallback:rule.triggers;
         for(std::size_t k=0;k<triggers.size();++k){

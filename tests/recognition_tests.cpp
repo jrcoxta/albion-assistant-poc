@@ -165,7 +165,8 @@ void checkRadialClock(const std::filesystem::path& assets) {
     real.setClockReference(aa::loadImage(assets/"other-food.png"));
     check(!real.recognize(last,64).remainingFraction,"Referencia de outro status nao produz relogio");
     const auto nativeFrames=assets.parent_path()/"tests"/"fixtures"/"recognition-clock";
-    check(real.setClockReference(aa::loadImage(assets/"assassin-clock-40.png")),"Referencia nativa40 aceita");
+    check(real.setClockReference(aa::loadImage(assets/"assassin-clock-40.png"),true),
+          "Referencia nativa40 aceita com ajuste próprio sem ampliar referências personalizadas");
     // Dois recortes da mesma HUD: o mapa muda os pixels do aro, mas nao o
     // status nem seus tres stacks.
     const auto mapFrames=assets.parent_path()/"tests"/"fixtures"/"recognition-map";
@@ -205,6 +206,45 @@ void checkRadialClock(const std::filesystem::path& assets) {
     for(const auto* file:{"0-77557234.png","238-77565415.png","400-77570263.png","473-77572698.png"})
         check(!real.recognizeNearSize(aa::loadImage(nativeFrames/file),38).remainingFraction,
             "Ausencia, disco iluminado ou frente encoberta nao inventam relogio40");
+    // HUD 34: 3 stacks renovados durante ataques. A frente real de 42 px
+    // continua geometrica, mas o template nativo40 tem ajuste menos exato.
+    aa::Recognizer hud34(assets);
+    hud34.setReference(aa::loadImage(nativeFrames/"hud34-identity-42.png"));
+    check(hud34.setStackReference(3,aa::loadImage(nativeFrames/"hud34-stack3-42.png")),
+          "Amostra 3 da HUD34 invalida");
+    const auto native40=aa::loadImage(assets/"assassin-clock-40.png");
+    check(hud34.setClockReference(native40),"Referencia nativa da HUD34 invalida");
+    for(const auto* file:{"hud34-9-4781.png","hud34-18-9312.png"})
+        check(!hud34.recognizeNearSize(aa::loadImage(nativeFrames/file),42).remainingFraction,
+              "Referencia generica herdou tolerancia do recurso nativo");
+    check(hud34.setClockReference(native40,true),"Recurso nativo da HUD34 invalido");
+    for(const auto& sample:{ClockCase{"hud34-9-4781.png",.85f,.93f},
+            ClockCase{"hud34-18-9312.png",.79f,.87f},ClockCase{"hud34-28-14312.png",.40f,.48f}}){
+        const auto measured=hud34.recognizeNearSize(aa::loadImage(nativeFrames/sample.file),42);
+        if(!measured.remainingFraction || *measured.remainingFraction<sample.low || *measured.remainingFraction>sample.high)
+            std::cerr<<"Relogio HUD34 "<<sample.file<<": "<<measured.remainingFraction.value_or(-1.f)
+                     <<" presence "<<static_cast<int>(measured.presence)<<" stacks "<<measured.stacks.value_or(0)
+                     <<" icon "<<measured.icon.x<<","<<measured.icon.y<<","<<measured.icon.width<<"\n";
+        check(measured.presence==aa::Presence::Present&&measured.stacks==3u&&measured.remainingFraction&&
+              *measured.remainingFraction>=sample.low&&*measured.remainingFraction<=sample.high,
+              "Frente real renovada de 3 stacks nao forneceu fracao nativa");
+    }
+    for(const auto* file:{"hud34-12-6297.png","hud34-24-12312.png","hud34-30-15312.png"})
+        check(!hud34.recognizeNearSize(aa::loadImage(nativeFrames/file),42).remainingFraction,
+              "Renovacao ambigua ou status ausente inventou fracao");
+    check(hud34.setClockReference(aa::loadImage(nativeFrames/"hud34-identity-42.png")),
+          "Restaurar referencia personalizada invalida");
+    check(!hud34.recognizeNearSize(aa::loadImage(nativeFrames/"hud34-9-4781.png"),42).remainingFraction,
+          "Trocar recurso nativo por referencia personalizada herdou tolerancia antiga");
+    check(hud34.setClockFallback(native40,true)&&
+          hud34.recognizeNearSize(aa::loadImage(nativeFrames/"hud34-9-4781.png"),42).remainingFraction,
+          "Fallback nativo nao recuperou frente quando referencia personalizada e insuficiente");
+    check(hud34.setClockFallback(native40)&&
+          !hud34.recognizeNearSize(aa::loadImage(nativeFrames/"hud34-9-4781.png"),42).remainingFraction,
+          "Fallback generico herdou tolerancia de recurso nativo anterior");
+    check(!hud34.setClockReference({},true)&&!hud34.clockReady()&&
+          !hud34.recognizeNearSize(aa::loadImage(nativeFrames/"hud34-9-4781.png"),42).remainingFraction,
+          "Referencia temporal invalida conservou o privilegio do preset");
     real.setClockReference(reference);
     check(!real.recognizeNearSize(aa::loadImage(nativeFrames/"150-77562806.png"),38).remainingFraction,
           "Referencia64 incompatível com renderizacao40 nao inventa relogio");

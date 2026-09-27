@@ -1,8 +1,11 @@
 #include "overlay_effect.h"
 #include "../src/overlay.cpp"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <functional>
 #include <iostream>
+#include <numbers>
 #include <objbase.h>
 
 namespace {
@@ -168,6 +171,77 @@ void remainingRingChecks() {
         }
     }
 }
+void flameChecks() {
+    using aa::OverlayEffect;
+    for (const auto shape : {aa::RegionShape::Circle, aa::RegionShape::Rectangle})
+    for (const SIZE dimensions : {SIZE{48, 48}, SIZE{96, 40}, SIZE{36, 96}}) {
+        const int w = dimensions.cx, h = dimensions.cy;
+        if (shape == aa::RegionShape::Circle && w != h) continue;
+        const auto render = [&](std::uint64_t time, std::optional<float> remaining = {}) {
+            return aa::renderOverlayEffect(w, h, OverlayEffect::Flames, RGB(240, 74, 174), shape, remaining, time);
+        };
+        const auto first = render(0), second = render(800), third = render(1600);
+        check(first.valid() && first.width == w + 64 && first.height == h + 64, "Chamas perderam margem");
+        check(first.bgra == render(3200).bgra && first.bgra != second.bgra && second.bgra != third.bgra,
+              "Chamas não percorrem o contorno em ciclo contínuo");
+        check(alphaAt(first, 32 + w / 2, 32 + h / 2) == 0, "Chamas esconderam a habilidade");
+        int moving = 0, outside = 0;
+        for (int y = 0; y < first.height; ++y) for (int x = 0; x < first.width; ++x) {
+            const auto i = at(first, x, y);
+            const bool exterior = x < 32 || y < 32 || x >= 32 + w || y >= 32 + h;
+            if (exterior && first.bgra[i + 3] > 20) ++outside;
+            if (exterior && std::abs(static_cast<int>(first.bgra[i + 3]) - second.bgra[i + 3]) > 20) ++moving;
+            for (const auto& frame : {std::cref(first), std::cref(second), std::cref(third)}) {
+                const auto& image = frame.get();
+                const unsigned alpha = image.bgra[i + 3];
+                check(image.bgra[i] <= alpha && image.bgra[i + 1] <= alpha && image.bgra[i + 2] <= alpha,
+                      "Chamas não mantêm BGRA premultiplicado");
+                if (x == 0 || y == 0 || x == image.width - 1 || y == image.height - 1)
+                    check(alpha <= 1, "Faíscas foram cortadas pela margem do bitmap");
+            }
+        }
+        check(outside > 120 && moving > 90, "Faíscas não saem da região ou não se movem visivelmente");
+        const auto ring = render(800, 0.5f);
+        const auto p = 32;
+        check(ring.bgra != second.bgra && alphaAt(ring, p + w / 2, p + h / 2) == 0 &&
+              alphaAt(ring, p, p + h / 2) > alphaAt(second, p, p + h / 2),
+              "Aro regressivo não permanece legível sobre Chamas");
+        check(render(800, std::numeric_limits<float>::quiet_NaN()).bgra == second.bgra,
+              "Tempo inválido alterou as Chamas");
+        check(aa::overlayEffectOpacity(OverlayEffect::Flames, 800) == 255,
+              "Chamas apagaram globalmente enquanto se movem");
+        if (shape == aa::RegionShape::Rectangle) {
+            // A primeira faísca alcança a quina superior direita; compare quadros adjacentes ao entrar no arco.
+            const double perimeter = 2.0 * (w - 10 + h - 10 + 5.0 * std::numbers::pi);
+            const auto cornerMs = static_cast<std::uint64_t>(std::lround(3200.0 * (w - 10) / perimeter));
+            const auto difference = [&](std::uint64_t start) {
+                const auto before = render(start), after = render(start + 2);
+                int delta = 0;
+                for (int y = 0; y < 38; ++y) for (int x = w + 16; x < w + 64; ++x)
+                    delta += std::abs(static_cast<int>(alphaAt(before, x, y)) -
+                                      static_cast<int>(alphaAt(after, x, y)));
+                return delta;
+            };
+            const int cornerDelta = difference(cornerMs - 1);
+            const int nearbyDelta = std::max(difference(cornerMs - 31), difference(cornerMs + 29));
+            check(cornerDelta < nearbyDelta + 1400, "Faísca saltou ao virar o canto do retângulo");
+        }
+    }
+    check(!aa::renderOverlayEffect(96, 40, OverlayEffect::Flames, 0, aa::RegionShape::Circle).valid(),
+          "Chamas aceitaram círculo não quadrado");
+}
+void flameCost() {
+    const auto start = std::chrono::steady_clock::now();
+    std::uint64_t checksum = 0;
+    for (int n = 0; n < 60; ++n) {
+        const auto image = aa::renderOverlayEffect(256, 256, aa::OverlayEffect::Flames,
+                                                    RGB(240, 74, 174), aa::RegionShape::Circle, {}, n * 50);
+        check(image.valid(), "Frame de Chamas inválido na geometria máxima usual");
+        checksum += image.bgra[static_cast<std::size_t>(image.width / 2) * 4 + 3];
+    }
+    const auto elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    std::cout << "chamas: 60 quadros 256 px em " << elapsed << " ms (checksum " << checksum << ")\n";
+}
 void placementChecks() {
     const auto full = overlayPlacement({0, 0, 100, 80}, {30, 20, 70, 60}, {-200, 150}, 8);
     check(full && full->destination.x == -178 && full->destination.y == 162 && full->source.x == 0 &&
@@ -261,7 +335,7 @@ void visibilityChecks() {
     DestroyWindow(target);
 }
 
-void saveGallery(const std::filesystem::path& directory, bool timer = false, bool gold = false) {
+void saveGallery(const std::filesystem::path& directory, bool timer = false, bool gold = false, bool flames = false) {
     auto canvas = solid(1320, 630, 14, 19, 28);
     // Fundo apenas ilustrativo, com variação visível sob a composição translúcida.
     for (int y = 72; y < 566; ++y) for (int x = 20; x < canvas.width - 20; ++x) {
@@ -301,11 +375,13 @@ void saveGallery(const std::filesystem::path& directory, bool timer = false, boo
         const auto shape = row == 0 ? aa::RegionShape::Rectangle : aa::RegionShape::Circle;
         const int centerX = 110 + cell * 220, centerY = 182 + row * 250;
         compose(icon, centerX - icon.width / 2, centerY - icon.height / 2, 255);
-        if (cell == 0 && !timer) continue;
-        const auto selectedEffect = timer ? aa::OverlayEffect::Glow : effects[cell];
+        if (cell == 0 && !timer && !flames) continue;
+        const auto selectedEffect = flames ? aa::OverlayEffect::Flames : timer ? aa::OverlayEffect::Glow : effects[cell];
         const std::optional<float> remaining = timer && cell > 0 ?
-            std::optional<float>(1.0f - (cell - 1) * 0.25f) : std::nullopt;
-        const auto effect = aa::renderOverlayEffect(icon.width, icon.height, selectedEffect, color, shape, remaining);
+            std::optional<float>(1.0f - (cell - 1) * 0.25f) :
+            flames && cell == 5 ? std::optional<float>(0.5f) : std::nullopt;
+        const auto effect = aa::renderOverlayEffect(icon.width, icon.height, selectedEffect, color, shape, remaining,
+                                                    static_cast<std::uint64_t>(cell) * 450);
         compose(effect, centerX - effect.width / 2, centerY - effect.height / 2,
                 aa::overlayEffectOpacity(selectedEffect, cell == 4 ? 750 : 0));
     }
@@ -323,12 +399,14 @@ void saveGallery(const std::filesystem::path& directory, bool timer = false, boo
     std::memcpy(bits, canvas.bgra.data(), canvas.bgra.size());
     SetBkMode(dc, TRANSPARENT); SetTextColor(dc, RGB(228, 235, 247));
     RECT heading{20, 20, 1300, 54};
-    DrawTextW(dc, gold ? L"Prévias do overlay · dourado selecionado · aura translúcida" :
+    DrawTextW(dc, flames ? L"Quadros do efeito Chamas · partículas em movimento · cor da regra" :
+              gold ? L"Prévias do overlay · dourado selecionado · aura translúcida" :
               timer ? L"Prévias do aro regressivo · frações simuladas · aura preservada" :
               L"Prévias do overlay · cor extraída do ícone · aura translúcida", -1, &heading, DT_CENTER | DT_SINGLELINE);
     const wchar_t* effectLabels[] = {L"Sem efeito", L"Borda", L"Brilho", L"Pulso · forte", L"Pulso · suave", L"Halo"};
     const wchar_t* timerLabels[] = {L"Sem relógio", L"100%", L"75%", L"50%", L"25%", L"0%"};
-    const auto* labels = timer ? timerLabels : effectLabels;
+    const wchar_t* flameLabels[] = {L"0 ms", L"450 ms", L"900 ms", L"1350 ms", L"1800 ms", L"2250 ms + aro"};
+    const auto* labels = flames ? flameLabels : timer ? timerLabels : effectLabels;
     for (int row = 0; row < 2; ++row) {
         RECT label{36, 86 + row * 250, 360, 118 + row * 250};
         DrawTextW(dc, row == 0 ? L"Área retangular" : L"Área circular", -1, &label, DT_LEFT | DT_SINGLELINE);
@@ -345,16 +423,19 @@ void saveGallery(const std::filesystem::path& directory, bool timer = false, boo
     SelectObject(dc, oldFont); SelectObject(dc, oldBitmap);
     DeleteObject(font); DeleteObject(bitmap); DeleteDC(dc);
     std::filesystem::create_directories(directory);
-    aa::saveImage(canvas, directory / (gold ? "overlay-gold.png" : timer ? "timer-overlay.png" : "overlay-effects.png"));
+    aa::saveImage(canvas, directory / (flames ? (gold ? "overlay-chamas-dourado.png" : "overlay-chamas.png") :
+                                       gold ? "overlay-gold.png" :
+                                       timer ? "timer-overlay.png" : "overlay-effects.png"));
 }
 }
 int main(int argc, char** argv) {
     const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     try {
-        rasterChecks(); remainingRingChecks(); placementChecks(); colorChecks(); visibilityChecks();
+        rasterChecks(); remainingRingChecks(); flameChecks(); flameCost(); placementChecks(); colorChecks(); visibilityChecks();
         check(overlayProc(nullptr, WM_NCHITTEST, 0, 0) == HTTRANSPARENT, "Overlay deixou de ser click-through");
         check(overlayProc(nullptr, WM_MOUSEACTIVATE, 0, 0) == MA_NOACTIVATE, "Overlay pode roubar foco");
-        if (argc > 1) { saveGallery(argv[1]); saveGallery(argv[1], true); saveGallery(argv[1], false, true); }
+        if (argc > 1) { saveGallery(argv[1]); saveGallery(argv[1], true); saveGallery(argv[1], false, true);
+                        saveGallery(argv[1], false, false, true); saveGallery(argv[1], false, true, true); }
         std::cout << "overlay: raster, aro regressivo, pulso, recorte, cor e guards nativos passaram\n";
         if (SUCCEEDED(com)) CoUninitialize();
         return 0;

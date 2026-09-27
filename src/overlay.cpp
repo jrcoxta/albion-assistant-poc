@@ -102,9 +102,9 @@ void Overlay::setRemaining(std::optional<float> remaining) {
     if (remaining_ != remaining) { remaining_ = remaining; drawn_ = false; }
 }
 
-bool Overlay::draw(int iconWidth, int iconHeight) {
+bool Overlay::draw(int iconWidth, int iconHeight, std::uint64_t elapsedMs) {
     aa::Image image;
-    try { image = aa::renderOverlayEffect(iconWidth, iconHeight, effect_, color_, shape_, remaining_); }
+    try { image = aa::renderOverlayEffect(iconWidth, iconHeight, effect_, color_, shape_, remaining_, elapsedMs); }
     catch (const std::exception&) { return false; }
     if (!image.valid()) return false;
     const int width = image.width, height = image.height;
@@ -154,9 +154,12 @@ void Overlay::update(HWND target, RECT icon, bool highlight) {
     const int iw = static_cast<int>(iconWidth), ih = static_cast<int>(iconHeight);
     auto placement = overlayPlacement(client, icon, origin, aa::overlayEffectPadding(effect_, iw, ih, shape_));
     if (!placement) { hide(); return; }
-    const bool redraw = !drawn_ || width_ != placement->bitmapSize.cx || height_ != placement->bitmapSize.cy;
-    if (redraw && !draw(iw, ih)) { hide(); return; }
-    const BYTE opacity = aa::overlayEffectOpacity(effect_, GetTickCount64());
+    const auto now = GetTickCount64();
+    const auto frame = now / 50;
+    const bool redraw = !drawn_ || width_ != placement->bitmapSize.cx || height_ != placement->bitmapSize.cy ||
+                        (effect_ == aa::OverlayEffect::Flames && frame_ != frame);
+    if (redraw && !draw(iw, ih, frame * 50)) { hide(); return; }
+    const BYTE opacity = aa::overlayEffectOpacity(effect_, now);
     // Pulso troca somente SourceConstantAlpha: não percorre pixels a cada atualização.
     if (redraw || opacity_ != opacity || source_.x != placement->source.x || source_.y != placement->source.y ||
         size_.cx != placement->size.cx || size_.cy != placement->size.cy) {
@@ -168,6 +171,7 @@ void Overlay::update(HWND target, RECT icon, bool highlight) {
             return;
         }
         drawn_ = true;
+        frame_ = frame;
         source_ = placement->source;
         size_ = placement->size;
         opacity_ = opacity;
