@@ -64,7 +64,8 @@ struct StatusRule {
     std::vector<StackSample> stackSamples;
     std::wstring clockReferencePath;
 };
-struct SetProfile { std::wstring id, name; std::vector<StatusRule> rules; };
+struct RuleLink { std::wstring ruleId; bool enabled = true; };
+struct SetProfile { std::wstring id, name; std::vector<RuleLink> rules; };
 struct Workspace {
     unsigned nextId = 1;
     int validityMs = 750;
@@ -72,10 +73,11 @@ struct Workspace {
     std::wstring activeHudId, activeSetId;
     std::vector<HudLayout> huds;
     std::vector<StatusDefinition> statuses;
+    std::vector<StatusRule> rules;
     std::vector<SetProfile> sets;
 };
 
-// Limites persistidos: 64 HUDs/status/sets, 32 areas por HUD/regras por set,
+// Limites persistidos: 64 HUDs/status/sets, 2048 regras, 32 areas por HUD/vinculos por perfil,
 // nomes com ate 251 unidades UTF-16, IDs ate 64, stacks 1..99 (rotulos unicos).
 // Entidades e regras podem ser rascunhos; readinessIssues valida a execucao.
 std::wstring newId(Workspace& workspace);
@@ -89,7 +91,9 @@ void saveWorkspace(const std::filesystem::path& file, const Workspace& workspace
 // Excluir somente a entidade escolhida; dependências compartilhadas permanecem.
 void eraseHud(Workspace& workspace, const std::wstring& id);
 void eraseSet(Workspace& workspace, const std::wstring& id);
+void eraseRule(Workspace& workspace, const std::wstring& id); // recusar se vinculada a algum perfil
 void eraseStatus(Workspace& workspace, const std::wstring& id); // recusar enquanto houver regras dependentes
+const StatusRule* findRule(const Workspace& workspace, const std::wstring& id);
 std::vector<unsigned> stackValues(const StatusDefinition& status);
 // Erros concretos nas regras habilitadas do set/HUD ativos. Arquivos ausentes também bloqueiam.
 std::vector<std::wstring> readinessIssues(const Workspace& workspace);

@@ -7,6 +7,12 @@ void require(bool value,const char* why){if(!value)throw std::runtime_error(why)
 aa::StatusRule rule(const wchar_t* id,const wchar_t* status,const wchar_t* source,const wchar_t* target,aa::Condition condition){
     aa::StatusRule r;r.id=id;r.statusId=status;r.sourceArea=source;r.targetArea=target;r.condition.name=id;r.condition.condition=condition;return r;
 }
+aa::StatusRule& linked(aa::Workspace& w,std::size_t index){
+    const auto id=w.sets.at(0).rules.at(index).ruleId;
+    auto found=std::find_if(w.rules.begin(),w.rules.end(),[&](const auto& value){return value.id==id;});
+    if(found==w.rules.end())throw std::runtime_error("Regra do perfil inexistente.");
+    return *found;
+}
 }
 int main(){try{
     aa::Workspace w;w.nextId=20;w.activeHudId=L"hud";w.activeSetId=L"set";
@@ -16,10 +22,10 @@ int main(){try{
     w.huds.push_back(hud);
     w.statuses={{L"a",L"Status A",false,true,{},{}},{L"b",L"Status B",true,true,{},{}}};
     aa::SetProfile set;set.id=L"set";set.name=L"Set de teste";
-    set.rules={rule(L"r1",L"a",L"Buffs",L"E",aa::Condition::StacksEqual),
-               rule(L"r2",L"b",L"Debuffs",L"Q",aa::Condition::Present),
-               rule(L"r3",L"a",L"buffs",L"E",aa::Condition::Present)};
-    set.rules[1].effect=aa::OverlayEffect::Pulse;w.sets.push_back(set);
+    w.rules={rule(L"r1",L"a",L"Buffs",L"E",aa::Condition::StacksEqual),
+                rule(L"r2",L"b",L"Debuffs",L"Q",aa::Condition::Present),
+                rule(L"r3",L"a",L"buffs",L"E",aa::Condition::Present)};
+    w.rules[1].effect=aa::OverlayEffect::Pulse;set.rules={{L"r1",true},{L"r2",true},{L"r3",true}};w.sets.push_back(set);
     auto plan=aa::makeMonitorPlan(w);
     require(plan.readers.size()==2&&plan.actions.size()==3,"duplicou reconhecimento do mesmo status/regiao");
     require(plan.actions[0].reader==plan.actions[2].reader,"regras do mesmo par nao compartilham observacao");
@@ -28,12 +34,28 @@ int main(){try{
     require(plan.readers[0].needsStacks&&!plan.readers[1].needsStacks,"presença/ausência exigiu contadores");
     require(!plan.readers[0].needsClock&&!plan.readers[1].needsClock,"regra antiga solicitou relogio");
     {
+        auto shared=w;
+        shared.sets.push_back({L"set2",L"Outro perfil",{{L"r2",true}}});
+        shared.sets[0].rules[1].enabled=false;
+        shared.rules[1].effect=aa::OverlayEffect::Flames;
+        shared.activeSetId=L"set2";
+        const auto secondPlan=aa::makeMonitorPlan(shared);
+        require(secondPlan.actions.size()==1&&secondPlan.actions[0].rule.id==L"r2"&&
+                secondPlan.actions[0].rule.effect==aa::OverlayEffect::Flames,
+                "edicao compartilhada nao chegou ao segundo perfil ativo");
+        shared.activeSetId=L"set";
+        const auto firstPlan=aa::makeMonitorPlan(shared);
+        require(firstPlan.actions.size()==2&&std::none_of(firstPlan.actions.begin(),firstPlan.actions.end(),
+                [](const auto& action){return action.rule.id==L"r2";}),
+                "desativar um vinculo afetou outro perfil ou ignorou o perfil ativo");
+    }
+    {
         auto scoped=w;
         const auto fixture=std::filesystem::path(__FILE__).wstring();
-        scoped.sets[0].rules[0].stackSamples={{3,fixture}};
-        scoped.sets[0].rules[2].condition.condition=aa::Condition::StacksEqual;
-        scoped.sets[0].rules[2].condition.stacks=2;
-        scoped.sets[0].rules[2].stackSamples={{2,fixture}};
+        linked(scoped,0).stackSamples={{3,fixture}};
+        linked(scoped,2).condition.condition=aa::Condition::StacksEqual;
+        linked(scoped,2).condition.stacks=2;
+        linked(scoped,2).stackSamples={{2,fixture}};
         const auto isolated=aa::makeMonitorPlan(scoped);
         require(isolated.readers.size()==3,"regras com amostras distintas compartilharam leitor");
         require(isolated.readers[0].status.stacks.size()==1&&isolated.readers[0].status.stacks[0].value==3,
@@ -42,12 +64,12 @@ int main(){try{
                 "leitor da segunda regra nao recebeu somente sua amostra");
     }
     {
-        auto clocks=w;clocks.sets[0].rules[2].followClock=true;
-        clocks.sets[0].rules[1].followClock=true;clocks.sets[0].rules[1].condition.condition=aa::Condition::Absent;
+        auto clocks=w;linked(clocks,2).followClock=true;
+        linked(clocks,1).followClock=true;linked(clocks,1).condition.condition=aa::Condition::Absent;
         const auto timed=aa::makeMonitorPlan(clocks);
         require(timed.readers.size()==2&&timed.readers[0].needsClock&&!timed.readers[1].needsClock,
                 "relogio nao compartilha origem ou foi exigido por ausencia");
-        clocks.sets[0].rules[2].condition.enabled=false;
+        clocks.sets[0].rules[2].enabled=false;
         require(!aa::makeMonitorPlan(clocks).readers[0].needsClock,"regra desativada exigiu relogio");
     }
     {
@@ -66,7 +88,7 @@ int main(){try{
         auto guarded=w;
         guarded.huds[0].areas[3].readyReferencePath=std::filesystem::path(__FILE__).wstring();
         guarded.huds[0].areas[3].readyConfirmed=true;
-        guarded.sets[0].rules[0].onlyWhenReady=true;
+        linked(guarded,0).onlyWhenReady=true;
         const auto guardedPlan=aa::makeMonitorPlan(guarded);
         require(guardedPlan.captureArea.y+guardedPlan.captureArea.height==540,
                 "captura nao incluiu a habilidade de destino");
@@ -79,7 +101,7 @@ int main(){try{
         require(aa::evaluateMonitor(guardedPlan,obs,1000,750,7,nullptr,&cooldown)==std::vector<bool>({false,false,false}),
                 "cooldown nao bloqueou outras regras do mesmo destino");
         guarded.huds[0].areas.push_back({L"E com outro nome",{400,500,40,40},48,false});
-        guarded.sets[0].rules[2].targetArea=L"E com outro nome";
+        linked(guarded,2).targetArea=L"E com outro nome";
         const auto aliasPlan=aa::makeMonitorPlan(guarded);
         require(aa::evaluateMonitor(aliasPlan,obs,1000,750,7,nullptr,&cooldown)==std::vector<bool>({false,false,false}),
                 "area com outro nome no mesmo icone ignorou cooldown");
@@ -116,12 +138,12 @@ int main(){try{
         alternatives.statuses[1].referencePath=(assets/L"other-buff.png").wstring();
         alternatives.statuses[1].stacks={{3,(assets/L"assassin-3-40.png").wstring()}};
         alternatives.statuses[1].clockReferencePath.clear();
-        auto& action=alternatives.sets[0].rules[0];
+        auto& action=linked(alternatives,0);
         action.action=action.condition;action.followClock=true;
         auto first=aa::RuleTrigger{L"assassin",L"a",L"Buffs",action.condition,{},L""};
         auto second=aa::RuleTrigger{L"fender",L"b",L"Debuffs",action.condition,{},L""};
         action.triggers={first,second};
-        alternatives.sets[0].rules={action};
+        alternatives.sets[0].rules={{action.id,true}};
         const auto alternatePlan=aa::makeMonitorPlan(alternatives);
         require(alternatePlan.readers.size()==2&&alternatePlan.readers[0].needsClock&&alternatePlan.readers[1].needsClock,
                 "regra OU nao solicitou leitura temporal separada por status");
@@ -140,7 +162,7 @@ int main(){try{
     }
     {
         auto composite=w;
-        auto& combined=composite.sets[0].rules[0]; combined.action=combined.condition;
+        auto& combined=linked(composite,0); combined.action=combined.condition;
         aa::RuleTrigger first; first.id=L"t-first"; first.statusId=combined.statusId; first.sourceArea=combined.sourceArea; first.condition=combined.condition;
         aa::RuleTrigger alternate; alternate.id=L"t-extra"; alternate.statusId=L"b"; alternate.sourceArea=L"Debuffs"; alternate.condition.condition=aa::Condition::Present;
         combined.triggers={first,alternate};
@@ -152,7 +174,7 @@ int main(){try{
     {
         auto health=w;
         health.huds[0].areas[0].healthCalibration={10,4,180,5,190,42,28};
-        auto& combined=health.sets[0].rules[0]; combined.action=combined.condition;
+        auto& combined=linked(health,0); combined.action=combined.condition;
         aa::RuleTrigger life; life.id=L"vida-49"; life.kind=aa::TriggerKind::Health; life.healthArea=L"Buffs";
         life.healthComparison=aa::HealthComparison::AtMost; life.healthPercent=49;
         combined.triggers={life};
@@ -175,7 +197,7 @@ int main(){try{
         auto mixed=health;
         mixed.huds[0].areas[3].readyReferencePath=std::filesystem::path(__FILE__).wstring();
         mixed.huds[0].areas[3].readyConfirmed=true;
-        auto& mixedRule=mixed.sets[0].rules[0];mixedRule.onlyWhenReady=true;
+        auto& mixedRule=linked(mixed,0);mixedRule.onlyWhenReady=true;
         aa::RuleTrigger statusTrigger;statusTrigger.id=L"status-alt";statusTrigger.kind=aa::TriggerKind::Status;
         statusTrigger.statusId=L"a";statusTrigger.sourceArea=L"Buffs";statusTrigger.condition.condition=aa::Condition::Present;
         mixedRule.triggers={statusTrigger,life};
@@ -203,14 +225,14 @@ int main(){try{
     require(aa::evaluateMonitor(plan,obs,1000,750,7)==std::vector<bool>({false,false,false}),"expiracao de leitura nao apagou acao");
     require(aa::evaluateMonitor(plan,obs,1000,750,8)==std::vector<bool>({false,false,false}),"fonte antiga reaproveitada");
     obs.pop_back();require(aa::evaluateMonitor(plan,obs,1000,750,7)==std::vector<bool>({false,false,false}),"lote parcial deveria apagar tudo");
-    w.sets[0].rules[0].sourceArea=L"faltando";
+    linked(w,0).sourceArea=L"faltando";
     bool rejected=false;try{aa::makeMonitorPlan(w);}catch(const std::exception&){rejected=true;}
     require(rejected,"regra sem area iniciou silenciosamente");
     w.sets[0].rules.erase(w.sets[0].rules.begin());
     w.statuses[0].stacks={{5,L"Z:\\arquivo-ausente-de-teste.png"}};
     require(aa::readinessIssues(w).empty(),"presença depende de arquivo de contagem");
     auto presencePlan=aa::makeMonitorPlan(w);require(!presencePlan.readers[1].needsStacks,"presença carregaria contadores");
-    w.sets[0].rules[1].condition.condition=aa::Condition::StacksEqual;w.sets[0].rules[1].condition.stacks=5;
+    linked(w,1).condition.condition=aa::Condition::StacksEqual;linked(w,1).condition.stacks=5;
     require(!aa::readinessIssues(w).empty(),"contagem com amostra ausente não bloqueou");
     std::cout<<"Plano multi-status, compartilhamento, acoes independentes, prioridade e expiracao verificados\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

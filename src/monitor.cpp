@@ -25,8 +25,14 @@ MonitorPlan makeMonitorPlan(const Workspace& workspace){
         result.captureArea.x=std::min(result.captureArea.x,area.x);result.captureArea.y=std::min(result.captureArea.y,area.y);
         result.captureArea.width=right-result.captureArea.x;result.captureArea.height=bottom-result.captureArea.y;
     };
-    for(const auto& rule:set->rules){
-        const auto action=actionOf(rule); if(!action.enabled)continue;
+    for(const auto& link:set->rules){
+        if(!link.enabled)continue;
+        const auto found=findRule(workspace,link.ruleId);
+        if(!found)throw std::runtime_error("Missing rule dependency.");
+        auto rule=*found;
+        rule.action.enabled=rule.condition.enabled=true;
+        for(auto& trigger:rule.triggers)trigger.condition.enabled=true;
+        const auto action=actionOf(rule);
         const auto target=std::find_if(hud->areas.begin(),hud->areas.end(),[&](const auto& a){return sameName(a.name,rule.targetArea);});
         if(target==hud->areas.end())throw std::runtime_error("Missing rule target.");
         MonitorAction monitored{rule,target->region,{}};

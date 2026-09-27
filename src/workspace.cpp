@@ -65,9 +65,10 @@ bool inBounds(const HudLayout& hud, const Region& r) {
 bool emptyRegion(const Region& r) { return r.x == 0 && r.y == 0 && r.width == 0 && r.height == 0; }
 void validate(const Workspace& w) {
     require(w.nextId > 0 && w.validityMs >= 1 && w.validityMs <= 60000, "Parametros do workspace invalidos.");
-    require(w.huds.size() <= entityLimit && w.statuses.size() <= entityLimit && w.sets.size() <= entityLimit,
-            "Limite de 64 HUDs, status ou sets excedido.");
-    Names ids, hudNames, statusNames, setNames;
+    require(w.huds.size() <= entityLimit && w.statuses.size() <= entityLimit && w.sets.size() <= entityLimit &&
+            w.rules.size() <= entityLimit * childLimit,
+             "Limite de 64 HUDs, status ou sets excedido.");
+    Names ids, hudNames, statusNames, setNames, ruleNames;
     const auto entity = [&](const auto& value, Names& names) {
         idValid(value.id); nameValid(value.name);
         require(ids.insert(value.id).second, "ID duplicado.");
@@ -102,17 +103,13 @@ void validate(const Workspace& w) {
             textValid(sample.path);
         }
     }
-    for (const auto& set : w.sets) {
-        entity(set, setNames);
-        require(set.rules.size() <= childLimit, "Limite de 32 regras por set excedido.");
-        Names ruleNames;
-        for (const auto& rule : set.rules) {
+    for (const auto& rule : w.rules) {
             idValid(rule.id); require(ids.insert(rule.id).second, "ID de regra duplicado.");
             idValid(rule.statusId, true);
             require(rule.statusId.empty() || byId(w.statuses, rule.statusId), "Regra referencia status inexistente.");
             nameValid(rule.sourceArea, true); nameValid(rule.targetArea, true);
             nameValid(rule.condition.name); textValid(rule.condition.profile, nameLimit);
-            require(ruleNames.insert(rule.condition.name).second, "Nome de regra duplicado no set.");
+            require(ruleNames.insert(rule.condition.name).second, "Nome de regra duplicado na biblioteca.");
             require(rule.condition.condition == Condition::StacksEqual || rule.condition.condition == Condition::Present ||
                     rule.condition.condition == Condition::Absent, "Condicao de regra invalida.");
             require(rule.condition.stacks >= 1 && rule.condition.stacks <= 99 && rule.condition.color <= 0xFFFFFF,
@@ -134,6 +131,15 @@ void validate(const Workspace& w) {
                     require(trigger.healthPercent >= 1 && trigger.healthPercent <= 100, "Percentual de vida invalido.");
                 }
             }
+    }
+    for (const auto& set : w.sets) {
+        entity(set, setNames);
+        require(set.rules.size() <= childLimit, "Limite de 32 regras por perfil excedido.");
+        Names links;
+        for (const auto& link : set.rules) {
+            idValid(link.ruleId);
+            require(byId(w.rules, link.ruleId) != nullptr && links.insert(link.ruleId).second,
+                    "Vinculo de regra inexistente ou duplicado no perfil.");
         }
     }
     idValid(w.activeHudId, true); idValid(w.activeSetId, true);
@@ -210,16 +216,21 @@ struct IniReader {
     }
     void finish() const {
         for (const auto& [section, keys] : remaining) {
-            require(visited.contains(section) && keys.empty(), "Campos ou contagens inesperados no workspace.");
+            if(!visited.contains(section)||!keys.empty()){
+                const auto& key=keys.empty()?section:*keys.begin();
+                const auto narrow=[](const std::wstring& value){std::string result;for(const auto c:value)result.push_back(c<128?static_cast<char>(c):'?');return result;};
+                throw std::invalid_argument("Secao/campo inesperado no workspace: "+narrow(section)+"/"+narrow(key));
+            }
         }
     }
 };
 std::wstring indexed(const std::wstring& prefix, std::size_t index) { return prefix + L"." + std::to_wstring(index); }
+std::wstring boundedName(const std::wstring& value, std::size_t limit);
 
 Workspace readWorkspace(const std::filesystem::path& file) {
     IniReader in(file);
-    const auto schema=in.number(L"workspace", L"schema", 5);
-    require(schema>=1&&schema<=5, "Schema de workspace nao suportado.");
+    const auto schema=in.number(L"workspace", L"schema", 6);
+    require(schema>=1&&schema<=6, "Schema de workspace nao suportado.");
     Workspace w;
     w.nextId = in.number(L"workspace", L"nextId", std::numeric_limits<unsigned>::max());
     w.validityMs = static_cast<int>(in.number(L"workspace", L"validityMs", 60000));
@@ -263,11 +274,11 @@ Workspace readWorkspace(const std::filesystem::path& file) {
         const auto section = indexed(L"status", i);
         StatusDefinition s;
         s.id = in.text(section, L"id"); s.name = in.text(section, L"name");
-        if(schema==1)s.debuff = in.number(section, L"debuff", 1) != 0;
+        if(schema==1||schema>=6)s.debuff = in.number(section, L"debuff", 1) != 0;
         s.builtinAssassin = in.number(section, L"builtinAssassin", 1) != 0;
         s.referencePath = in.text(section, L"referencePath");
-        if(schema==1) {
-            if (in.contains(section, L"clockReferencePath")) s.clockReferencePath = in.text(section, L"clockReferencePath");
+        if(schema==1||schema>=6) {
+            if (schema>=6 || in.contains(section, L"clockReferencePath")) s.clockReferencePath = in.text(section, L"clockReferencePath");
             const auto count = in.number(section, L"stackCount", 99);
             for (unsigned j = 0; j < count; ++j) {
                 const auto child = indexed(section + L".stack", j);
@@ -276,13 +287,7 @@ Workspace readWorkspace(const std::filesystem::path& file) {
         }
         w.statuses.push_back(std::move(s));
     }
-    for (unsigned i = 0; i < setCount; ++i) {
-        const auto section = indexed(L"set", i);
-        SetProfile s;
-        s.id = in.text(section, L"id"); s.name = in.text(section, L"name");
-        const auto count = in.number(section, L"ruleCount", static_cast<unsigned>(childLimit));
-        for (unsigned j = 0; j < count; ++j) {
-            const auto child = indexed(section + L".rule", j);
+    const auto readRule = [&](const std::wstring& child) {
             StatusRule r;
             r.id = in.text(child, L"id"); r.statusId = in.text(child, L"statusId");
             r.sourceArea = in.text(child, L"sourceArea"); r.targetArea = in.text(child, L"targetArea");
@@ -314,20 +319,44 @@ Workspace readWorkspace(const std::filesystem::path& file) {
                         t.healthComparison=static_cast<HealthComparison>(in.number(trigger,L"healthComparison",1));t.healthPercent=in.number(trigger,L"healthPercent",100); }
                     r.triggers.push_back(std::move(t));}
             }
-            s.rules.push_back(std::move(r));
+            if(schema==1) {
+                const auto status=std::find_if(w.statuses.begin(),w.statuses.end(),[&](const auto& value){return value.id==r.statusId;});
+                if(status!=w.statuses.end()) {
+                    if(r.condition.condition==Condition::StacksEqual)
+                        for(const auto& sample:status->stacks)if(sample.value==r.condition.stacks)r.stackSamples.push_back(sample);
+                    if(r.followClock)r.clockReferencePath=status->clockReferencePath;
+                }
+            }
+            if(schema<3) {
+                r.action=r.condition;
+                r.triggers={{r.id+L"-trigger",r.statusId,r.sourceArea,r.condition,r.stackSamples,r.clockReferencePath}};
+            }
+            return r;
+    };
+    const auto ruleCount = schema >= 6 ? in.number(L"workspace",L"ruleCount",static_cast<unsigned>(entityLimit*childLimit)) : 0;
+    if (schema >= 6) for (unsigned i=0;i<ruleCount;++i) w.rules.push_back(readRule(indexed(L"rule",i)));
+    for (unsigned i = 0; i < setCount; ++i) {
+        const auto section = indexed(L"set", i);
+        SetProfile s;
+        s.id = in.text(section, L"id"); s.name = in.text(section, L"name");
+        const auto count = in.number(section, L"ruleCount", static_cast<unsigned>(childLimit));
+        for (unsigned j = 0; j < count; ++j) {
+            const auto child = indexed(section + L".rule", j);
+            if (schema >= 6) s.rules.push_back({in.text(child,L"ruleId"),in.number(child,L"enabled",1)!=0});
+            else {
+                auto r=readRule(child);
+                const bool enabled=r.action.enabled;
+                r.condition.profile.clear(); r.action.profile.clear();
+                auto name=r.condition.name;
+                for(unsigned suffix=2;std::any_of(w.rules.begin(),w.rules.end(),[&](const auto& other){return sameName(other.condition.name,r.condition.name);});++suffix) {
+                    const auto tail=L" ("+std::to_wstring(suffix)+L")";
+                    r.condition.name=boundedName(name,nameLimit-tail.size())+tail;
+                    r.action.name=r.condition.name;
+                }
+                s.rules.push_back({r.id,enabled}); w.rules.push_back(std::move(r));
+            }
         }
         w.sets.push_back(std::move(s));
-    }
-    if(schema==1) for(auto& set:w.sets) for(auto& rule:set.rules) {
-        const auto status=std::find_if(w.statuses.begin(),w.statuses.end(),[&](const auto& value){return value.id==rule.statusId;});
-        if(status==w.statuses.end())continue;
-        if(rule.condition.condition==Condition::StacksEqual)
-            for(const auto& sample:status->stacks)if(sample.value==rule.condition.stacks)rule.stackSamples.push_back(sample);
-        if(rule.followClock)rule.clockReferencePath=status->clockReferencePath;
-    }
-    if(schema<3) for(auto& profile:w.sets) for(auto& rule:profile.rules) {
-        rule.action=rule.condition;
-        rule.triggers={{rule.id+L"-trigger",rule.statusId,rule.sourceArea,rule.condition,rule.stackSamples,rule.clockReferencePath}};
     }
     in.finish(); validate(w); return w;
 }
@@ -404,7 +433,9 @@ void importLegacy(Workspace& w, const Settings& old, const std::filesystem::path
         if (importedRule.condition == Condition::StacksEqual) importedRule.enabled = false;
     }
     const auto foundSet = std::find_if(w.sets.begin(), w.sets.end(), [&](const auto& s) {
-        return s.rules.size() == 1 && s.rules[0].statusId == statusId && sameRule(s.rules[0].condition, importedRule);
+        if (s.rules.size() != 1) return false;
+        const auto* rule=byId(w.rules,s.rules[0].ruleId);
+        return rule && rule->statusId == statusId && sameRule(rule->condition, importedRule);
     });
     std::wstring setId;
     if (foundSet != w.sets.end()) setId = foundSet->id;
@@ -414,7 +445,14 @@ void importLegacy(Workspace& w, const Settings& old, const std::filesystem::path
         StatusRule rule;
         rule.id = newId(w); rule.statusId = statusId; rule.sourceArea = L"Buffs"; rule.targetArea = L"Destaque"; rule.condition = importedRule;
         rule.stackSamples=legacyStacks;
-        set.rules.push_back(std::move(rule)); setId = set.id; w.sets.push_back(std::move(set));
+        for (unsigned suffix=2;std::any_of(w.rules.begin(),w.rules.end(),[&](const auto& other){return sameName(other.condition.name,rule.condition.name);});++suffix) {
+            const auto tail=L" ("+std::to_wstring(suffix)+L")";
+            rule.condition.name=boundedName(importedRule.name,nameLimit-tail.size())+tail;
+        }
+        rule.action=rule.condition;
+        rule.triggers={{rule.id+L"-trigger",rule.statusId,rule.sourceArea,rule.condition,rule.stackSamples,rule.clockReferencePath}};
+        set.rules.push_back({rule.id,rule.action.enabled}); w.rules.push_back(std::move(rule));
+        setId = set.id; w.sets.push_back(std::move(set));
     }
     if (active) { w.activeHudId = hudId; w.activeSetId = setId; w.validityMs = old.validityMs; }
 }
@@ -430,7 +468,8 @@ std::wstring newId(Workspace& w) {
     Names ids;
     for (const auto& h : w.huds) ids.insert(h.id);
     for (const auto& s : w.statuses) ids.insert(s.id);
-    for (const auto& s : w.sets) { ids.insert(s.id); for (const auto& r : s.rules) ids.insert(r.id); }
+    for (const auto& s : w.sets) ids.insert(s.id);
+    for (const auto& r : w.rules) ids.insert(r.id);
     while (w.nextId > 0 && w.nextId < std::numeric_limits<unsigned>::max()) {
         const auto id = L"id-" + std::to_wstring(w.nextId++);
         if (!ids.contains(id)) return id;
@@ -476,15 +515,10 @@ void saveWorkspace(const std::filesystem::path& file, const Workspace& w) {
         };
         const auto text = [&](const std::wstring& section, const wchar_t* key, const std::wstring& value) { write(section, key, L"\"" + value + L"\""); };
         const auto number = [&](const std::wstring& section, const wchar_t* key, auto value) { write(section, key, std::to_wstring(value)); };
-        const bool composite=std::any_of(w.sets.begin(),w.sets.end(),[](const auto& profile){return std::any_of(profile.rules.begin(),profile.rules.end(),[](const auto& rule){return rule.triggers.size()>1;});});
-        const bool health=std::any_of(w.huds.begin(),w.huds.end(),[](const auto& hud){return std::any_of(hud.areas.begin(),hud.areas.end(),[](const auto& area){return area.healthCalibration.valid();});}) ||
-            std::any_of(w.sets.begin(),w.sets.end(),[](const auto& profile){return std::any_of(profile.rules.begin(),profile.rules.end(),[](const auto& rule){return std::any_of(rule.triggers.begin(),rule.triggers.end(),[](const auto& trigger){return trigger.kind==TriggerKind::Health;});});});
-        const bool ready=std::any_of(w.huds.begin(),w.huds.end(),[](const auto& hud){return std::any_of(hud.areas.begin(),hud.areas.end(),[](const auto& area){return !area.readyReferencePath.empty();});}) ||
-            std::any_of(w.sets.begin(),w.sets.end(),[](const auto& profile){return std::any_of(profile.rules.begin(),profile.rules.end(),[](const auto& rule){return rule.onlyWhenReady;});});
-        const bool triggerSchema=composite||health||ready;
-        number(L"workspace", L"schema", ready?5:(health?4:(composite?3:2))); number(L"workspace", L"nextId", w.nextId);
+        const bool health=true,ready=true,triggerSchema=true;
+        number(L"workspace", L"schema", 6); number(L"workspace", L"nextId", w.nextId);
         number(L"workspace", L"validityMs", w.validityMs); number(L"workspace", L"shareOverlayInCapture", w.shareOverlayInCapture ? 1 : 0); text(L"workspace", L"activeHudId", w.activeHudId); text(L"workspace", L"activeSetId", w.activeSetId);
-        number(L"workspace", L"hudCount", w.huds.size()); number(L"workspace", L"statusCount", w.statuses.size()); number(L"workspace", L"setCount", w.sets.size());
+        number(L"workspace", L"hudCount", w.huds.size()); number(L"workspace", L"statusCount", w.statuses.size()); number(L"workspace", L"setCount", w.sets.size()); number(L"workspace", L"ruleCount", w.rules.size());
         for (std::size_t i = 0; i < w.huds.size(); ++i) {
             const auto section = indexed(L"hud", i); const auto& h = w.huds[i];
             text(section, L"id", h.id); text(section, L"name", h.name);
@@ -507,13 +541,14 @@ void saveWorkspace(const std::filesystem::path& file, const Workspace& w) {
         for (std::size_t i = 0; i < w.statuses.size(); ++i) {
             const auto section = indexed(L"status", i); const auto& s = w.statuses[i];
             text(section, L"id", s.id); text(section, L"name", s.name);
+            number(section,L"debuff",s.debuff?1:0);
             number(section, L"builtinAssassin", s.builtinAssassin ? 1 : 0); text(section, L"referencePath", s.referencePath);
+            text(section,L"clockReferencePath",s.clockReferencePath);number(section,L"stackCount",s.stacks.size());
+            for(std::size_t j=0;j<s.stacks.size();++j){const auto child=indexed(section+L".stack",j);
+                number(child,L"value",s.stacks[j].value);text(child,L"path",s.stacks[j].path);}
         }
-        for (std::size_t i = 0; i < w.sets.size(); ++i) {
-            const auto section = indexed(L"set", i); const auto& s = w.sets[i];
-            text(section, L"id", s.id); text(section, L"name", s.name); number(section, L"ruleCount", s.rules.size());
-            for (std::size_t j = 0; j < s.rules.size(); ++j) {
-                const auto child = indexed(section + L".rule", j); const auto& r = s.rules[j];
+        for (std::size_t j = 0; j < w.rules.size(); ++j) {
+                const auto child = indexed(L"rule", j); const auto& r = w.rules[j];
                 text(child, L"id", r.id); text(child, L"statusId", r.statusId); text(child, L"sourceArea", r.sourceArea); text(child, L"targetArea", r.targetArea);
                 text(child, L"name", r.condition.name); text(child, L"profile", r.condition.profile);
                 number(child, L"enabled", r.condition.enabled ? 1 : 0); number(child, L"condition", static_cast<int>(r.condition.condition));
@@ -535,6 +570,13 @@ void saveWorkspace(const std::filesystem::path& file, const Workspace& w) {
                         for(std::size_t n=0;n<t.stackSamples.size();++n){const auto sample=indexed(triggerSection+L".stack",n);number(sample,L"value",t.stackSamples[n].value);text(sample,L"path",t.stackSamples[n].path);}
                          if(health||ready){number(triggerSection,L"kind",static_cast<int>(t.kind));text(triggerSection,L"healthArea",t.healthArea);number(triggerSection,L"healthComparison",static_cast<int>(t.healthComparison));number(triggerSection,L"healthPercent",t.healthPercent);}}
                 }
+        }
+        for (std::size_t i = 0; i < w.sets.size(); ++i) {
+            const auto section = indexed(L"set", i); const auto& s = w.sets[i];
+            text(section,L"id",s.id);text(section,L"name",s.name);number(section,L"ruleCount",s.rules.size());
+            for (std::size_t j=0;j<s.rules.size();++j) {
+                const auto child=indexed(section+L".rule",j);
+                text(child,L"ruleId",s.rules[j].ruleId);number(child,L"enabled",s.rules[j].enabled?1:0);
             }
         }
         // A chamada de flush retorna zero tambem quando tem sucesso; verificar disco abaixo.
@@ -560,12 +602,27 @@ void eraseSet(Workspace& w, const std::wstring& id) {
 }
 void eraseStatus(Workspace& w, const std::wstring& id) {
     const auto copy = id;
-    for (const auto& set : w.sets)
-        for (const auto& rule : set.rules) {
+    for (const auto& rule : w.rules) {
             require(rule.statusId != copy, "Status usado por uma regra; remova a dependencia antes de excluir.");
             for (const auto& trigger : rule.triggers) require(trigger.statusId != copy, "Status usado por uma regra; remova a dependencia antes de excluir.");
-        }
+    }
     std::erase_if(w.statuses, [&](const auto& s) { return s.id == copy; });
+}
+const StatusRule* findRule(const Workspace& w,const std::wstring& id){return byId(w.rules,id);}
+void eraseRule(Workspace& w,const std::wstring& id) {
+    std::wstring owners;
+    for(const auto& set:w.sets)for(const auto& link:set.rules)if(link.ruleId==id){
+        if(!owners.empty())owners+=L", ";owners+=set.name;break;
+    }
+    if(!owners.empty()){
+        const int length=WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,owners.data(),static_cast<int>(owners.size()),nullptr,0,nullptr,nullptr);
+        if(length<=0)throw std::invalid_argument("Nao foi possivel listar os perfis desta regra.");
+        std::string names(static_cast<std::size_t>(length),'\0');
+        if(WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,owners.data(),static_cast<int>(owners.size()),names.data(),length,nullptr,nullptr)!=length)
+            throw std::invalid_argument("Nao foi possivel listar os perfis desta regra.");
+        throw std::invalid_argument("Remova a regra dos perfis antes de exclui-la: "+names);
+    }
+    std::erase_if(w.rules,[&](const auto& rule){return rule.id==id;});
 }
 std::vector<unsigned> stackValues(const StatusDefinition& status) {
     std::set<unsigned> values;
@@ -582,7 +639,10 @@ std::vector<std::wstring> readinessIssues(const Workspace& w) {
     const auto exists=[](const std::wstring& path){std::error_code error;return !path.empty()&&std::filesystem::is_regular_file(path,error);};
     bool enabled=false;
     for(std::size_t i=0;i<set->rules.size();++i){
-        const auto& rule=set->rules[i];const auto& action=rule.triggers.empty()?rule.condition:rule.action;if(!action.enabled)continue;enabled=true;
+        const auto& link=set->rules[i];if(!link.enabled)continue;
+        const auto* found=byId(w.rules,link.ruleId);
+        if(!found){issues.push_back(L"Perfil contem regra inexistente: "+link.ruleId);continue;}
+        const auto& rule=*found;const auto& action=rule.triggers.empty()?rule.condition:rule.action;enabled=true;
         const auto prefix=L"Regra "+std::to_wstring(i+1)+L" ("+action.name+L"): ";const auto issue=[&](const std::wstring& value){issues.push_back(prefix+value);};
         const auto area=[&](const std::wstring& name)->const HudArea*{if(!hud)return nullptr;const auto found=std::find_if(hud->areas.begin(),hud->areas.end(),[&](const auto& a){return sameName(a.name,name);});return found==hud->areas.end()?nullptr:&*found;};
         const auto* target=area(rule.targetArea);if(!target)issue(L"regiao de destino inexistente: "+rule.targetArea);else if(!inBounds(*hud,target->region))issue(L"regiao de destino nao esta calibrada dentro da HUD.");

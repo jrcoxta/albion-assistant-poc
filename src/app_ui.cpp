@@ -74,7 +74,7 @@ int conditionIndex(aa::Condition condition) {
 struct AreaUsage {bool read=false,health=false,highlight=false;};
 AreaUsage areaUsage(const aa::Workspace& workspace,const std::wstring& name) {
     AreaUsage usage;
-    for(const auto& set:workspace.sets)for(const auto& rule:set.rules) {
+    for(const auto& rule:workspace.rules) {
         usage.read|=aa::sameName(rule.sourceArea,name);
         usage.highlight|=aa::sameName(rule.targetArea,name);
         for(const auto& trigger:rule.triggers)if(trigger.kind==aa::TriggerKind::Health)usage.health|=aa::sameName(trigger.healthArea,name);
@@ -106,7 +106,7 @@ void validateNewName(App& app,int id,const std::wstring& name){
     else if(id==NewStatus||id==RenameStatus)checkName(values.statuses,id==RenameStatus?app.selectedStatusId:L"",name);
     else if(id==NewSet||id==RenameSet)checkName(values.sets,id==RenameSet?values.activeSetId:L"",name);
     else if(id==NewArea||id==RenameArea){const auto hud=byId(values.huds,values.activeHudId);if(!hud)throw std::runtime_error("Create a HUD first.");for(std::size_t i=0;i<hud->areas.size();++i)if((id!=RenameArea||static_cast<int>(i)!=app.selectedArea)&&aa::sameName(hud->areas[i].name,name))throw std::runtime_error("Area name already exists.");}
-    else {const auto profile=byId(values.sets,values.activeSetId);if(!profile)throw std::runtime_error("Create a profile first.");for(std::size_t i=0;i<profile->rules.size();++i)if((id!=RenameRule||static_cast<int>(i)!=app.selectedRule)&&aa::sameName(profile->rules[i].condition.name,name))throw std::runtime_error("Rule name already exists.");}
+    else {for(std::size_t i=0;i<values.rules.size();++i)if((id!=RenameRule||static_cast<int>(i)!=app.selectedRule)&&aa::sameName(values.rules[i].condition.name,name))throw std::runtime_error("Já existe uma regra com esse nome na biblioteca.");}
 }
 struct NamePrompt{App& app;int command;const wchar_t* title;const wchar_t* hint;std::wstring name;};
 INT_PTR CALLBACK namePromptProc(HWND dialog,UINT message,WPARAM wp,LPARAM lp){
@@ -222,8 +222,8 @@ void App::makeUI() {
     auto title=control(L"STATIC",L"ALBION ASSISTANT",0,42,15,790,34);
     SendMessageW(title,WM_SETFONT,reinterpret_cast<WPARAM>(titleFont),FALSE);theme::styleControl(title,theme::Role::Title);
     control(L"STATIC",L"",SS_ENDELLIPSIS,40,53,776,26,ActiveNames);
-    const wchar_t* tabs[]={L"HUDs",L"Status",L"Perfis e regras",L"Monitorar"};
-    for(int i=0;i<4;++i){button(tabs[i],Tab0+i,24+i*206,88,194);theme::styleControl(item(Tab0+i),theme::Role::Tab);theme::setActive(item(Tab0+i),i==page);}
+    const wchar_t* tabs[]={L"HUDs",L"Status",L"Regras",L"Perfis",L"Monitorar"};
+    for(int i=0;i<5;++i){button(tabs[i],Tab0+i,24+i*164,88,156);theme::styleControl(item(Tab0+i),theme::Role::Tab);theme::setActive(item(Tab0+i),i==page);}
     auto combo=[&](int id,int x,int y,int width) {return control(L"COMBOBOX",L"",WS_TABSTOP|CBS_DROPDOWNLIST|CBS_OWNERDRAWFIXED|CBS_HASSTRINGS|WS_VSCROLL,x,y,width,240,id);};
     auto list=[&](int id,int x,int y,int width,int height) {return control(L"LISTBOX",L"",WS_TABSTOP|WS_BORDER|WS_VSCROLL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT|LBS_OWNERDRAWFIXED|LBS_HASSTRINGS,x,y,width,height,id);};
     auto hudChoices=[&](int x,int y,int width) {
@@ -234,7 +234,7 @@ void App::makeUI() {
         auto field=combo(SetList,x,y,width);for(const auto& value:workspace.sets)add(field,value.name);
         choose(field,indexOf(workspace.sets,workspace.activeSetId));
     };
-    if(page==3) {
+    if(page==4) {
         label(L"HUD",24,136,180);hudChoices(24,158,180);
         label(L"Perfil",218,136,180);setChoices(218,158,180);
         button(L"Conectar",Connect,412,158,112);button(L"Iniciar",Start,536,158,112);button(L"Parar",Stop,660,158,172);
@@ -304,34 +304,53 @@ void App::makeUI() {
             if(selectedStatus())try {if(!selectedStatus()->referencePath.empty())referencePreview=aa::loadImage(selectedStatus()->referencePath);else if(selectedStatus()->builtinAssassin)referencePreview=aa::loadImageResource(IDR_ASSASSIN_NONE);}catch(const std::exception& e){error=L"N\u00e3o foi poss\u00edvel abrir a refer\u00eancia: "+widen(e.what());}
             for(int id:{CaptureStatus,ImportStatus,DeleteStatus,CaptureClock,RenameStatus})EnableWindow(item(id),selectedStatus()!=nullptr);
         }
-    } else {
-        if(!set()) {
-            auto heading=control(L"STATIC",workspace.sets.empty()?L"Crie seu primeiro perfil":L"Escolha ou crie um perfil",0,64,236,720,40);SendMessageW(heading,WM_SETFONT,reinterpret_cast<WPARAM>(titleFont),FALSE);
-            if(!workspace.sets.empty())setChoices(64,300,400);
-            label(L"Um perfil re\u00fane as regras do seu set.",64,355,520,26);
-            button(L"Criar perfil",NewSet,64,400,220);theme::styleControl(item(NewSet),theme::Role::Primary);
+    } else if(page==3) {
+        label(L"Perfil",24,136,238);setChoices(24,158,238);
+        button(L"Criar perfil",NewSet,282,158,180);
+        if(set()) {
+            button(L"Renomear",RenameSet,474,158,180);button(L"Excluir",DeleteSet,666,158,166);
+            label(L"Regras deste perfil (em ordem de prioridade)",24,211,808);
+            auto links=list(RuleList,24,239,410,288);
+            for(const auto& link:set()->rules) {
+                const auto* definition=aa::findRule(workspace,link.ruleId);
+                add(links,(link.enabled?L"● ":L"○ ")+(definition?definition->condition.name:L"Regra indisponível"),true);
+            }
+            if(selectedLink>=static_cast<int>(set()->rules.size()))selectedLink=-1;
+            choose(links,selectedLink,true);
+            label(L"Adicionar regra da biblioteca",458,239,370);
+            auto available=combo(AvailableRule,458,267,370);
+            for(const auto& definition:workspace.rules)
+                if(std::none_of(set()->rules.begin(),set()->rules.end(),[&](const auto& link){return link.ruleId==definition.id;}))add(available,definition.condition.name);
+            choose(available,workspace.rules.empty()?-1:0);
+            button(L"Adicionar ao perfil",AddRuleToSet,458,307,370);
+            button(L"Remover do perfil",RemoveRuleFromSet,458,359,370);
+            button(L"Subir",MoveRuleUp,458,407,175);button(L"Descer",MoveRuleDown,653,407,175);
+            control(L"BUTTON",L"Ativada neste perfil",WS_TABSTOP|BS_AUTOCHECKBOX,458,465,300,26,Enabled);
+            if(selectedLink>=0&&selectedLink<static_cast<int>(set()->rules.size()))
+                SendMessageW(item(Enabled),BM_SETCHECK,set()->rules[static_cast<std::size_t>(selectedLink)].enabled?BST_CHECKED:BST_UNCHECKED,0);
+            for(int id:{RemoveRuleFromSet,MoveRuleUp,MoveRuleDown,Enabled})EnableWindow(item(id),selectedLink>=0);
+            EnableWindow(item(AddRuleToSet),SendMessageW(available,CB_GETCOUNT,0,0)>0);
         } else {
-            label(L"Perfil",24,136,238);setChoices(24,158,238);
-            button(L"Criar",NewSet,282,158,180);button(L"Renomear",RenameSet,474,158,180);button(L"Excluir",DeleteSet,666,158,166);
-            if(set()->rules.empty()) {
-                selectedRule=-1;
-                label(L"Adicione a primeira regra deste perfil.",64,300,620,26);
-                button(L"Criar regra",NewRule,64,344,220);theme::styleControl(item(NewRule),theme::Role::Primary);
-            } else {
-                label(L"Regras",24,225,238);auto rules=list(RuleList,24,250,238,242);
-                for(const auto& value:set()->rules)add(rules,value.condition.name,true);
-                if(selectedRule<0||selectedRule>=static_cast<int>(set()->rules.size()))selectedRule=0;
+            label(L"Crie um perfil e adicione regras já configuradas na biblioteca.",64,300,720,36);
+        }
+    } else {
+        if(workspace.rules.empty()) {
+            auto heading=control(L"STATIC",L"Crie sua primeira regra",0,64,236,720,40);SendMessageW(heading,WM_SETFONT,reinterpret_cast<WPARAM>(titleFont),FALSE);
+            label(L"Configure a regra uma vez e inclua-a nos perfis que quiser.",64,300,720,26);
+            button(L"Criar regra",NewRule,64,344,220);theme::styleControl(item(NewRule),theme::Role::Primary);
+        } else {
+                label(L"Biblioteca de regras",24,136,238);
+                auto rules=list(RuleList,24,160,238,334);
+                for(const auto& value:workspace.rules)add(rules,value.condition.name,true);
+                if(selectedRule<0||selectedRule>=static_cast<int>(workspace.rules.size()))selectedRule=0;
                 choose(rules,selectedRule,true);
                 button(L"Criar regra",NewRule,24,496,236);
-                button(L"Subir",MoveRuleUp,24,536,112);button(L"Descer",MoveRuleDown,148,536,112);
-                button(L"Renomear",RenameRule,24,576,112);button(L"Excluir",DeleteRule,148,576,112);
+                button(L"Renomear",RenameRule,24,536,112);button(L"Excluir",DeleteRule,148,536,112);
                 auto* currentRule=rule();
                 if(currentRule->action.name.empty())currentRule->action=currentRule->condition;
                 if(currentRule->triggers.empty())currentRule->triggers={{currentRule->id+L"-trigger",currentRule->statusId,currentRule->sourceArea,currentRule->condition,currentRule->stackSamples,currentRule->clockReferencePath}};
                 selectedTrigger=std::clamp(selectedTrigger,0,static_cast<int>(currentRule->triggers.size())-1);
                 auto& trigger=currentRule->triggers[static_cast<std::size_t>(selectedTrigger)];
-                control(L"BUTTON",L"Ativada",WS_TABSTOP|BS_AUTOCHECKBOX,282,578,206,24,Enabled);
-                SendMessageW(item(Enabled),BM_SETCHECK,currentRule->action.enabled?BST_CHECKED:BST_UNCHECKED,0);
                 label(L"Condi\u00e7\u00f5es",282,225,260);
                 auto triggers=combo(TriggerList,282,247,164);for(std::size_t i=0;i<currentRule->triggers.size();++i)add(triggers,L"Condi\u00e7\u00e3o "+std::to_wstring(i+1));choose(triggers,selectedTrigger);
                 label(L"Tipo",454,225,130);auto triggerKind=combo(TriggerKindBox,454,247,130);add(triggerKind,L"Status");add(triggerKind,L"Vida");choose(triggerKind,trigger.kind==aa::TriggerKind::Health?1:0);
@@ -362,13 +381,11 @@ void App::makeUI() {
                 SendMessageW(item(OnlyWhenReady),BM_SETCHECK,currentRule->onlyWhenReady?BST_CHECKED:BST_UNCHECKED,0);
                 label(L"Afeta regras do mesmo destino.",590,554,242,18);
                 button(L"Testar destaque",TestAction,600,574,232);
-                for(int id:{DeleteSet,NewRule,RenameSet})EnableWindow(item(id),set()!=nullptr);
-                 for(int id:{Enabled,TriggerList,TriggerKindBox,RuleStatus,SourceArea,HealthArea,HealthComparisonBox,HealthPercent,ConditionBox,Stacks,EffectBox,TargetArea,Color,SampleColor,CaptureRuleStack,DeleteRuleStack,TestAction,DeleteRule,MoveRuleUp,MoveRuleDown,RenameRule,NewTrigger,DeleteTrigger,OnlyWhenReady})if(item(id))EnableWindow(item(id),rule()!=nullptr);
+                for(int id:{TriggerList,TriggerKindBox,RuleStatus,SourceArea,HealthArea,HealthComparisonBox,HealthPercent,ConditionBox,Stacks,EffectBox,TargetArea,Color,SampleColor,CaptureRuleStack,DeleteRuleStack,TestAction,DeleteRule,RenameRule,NewTrigger,DeleteTrigger,OnlyWhenReady})if(item(id))EnableWindow(item(id),rule()!=nullptr);
                 EnableWindow(item(DeleteTrigger),currentRule->triggers.size()>1);
                 updateRuleChoices();
             }
         }
-    }
     statusLabel=control(L"STATIC",L"",SS_ENDELLIPSIS,28,625,804,20);
     label(L"Atalhos",24,663,58,20);
     auto f8=control(L"STATIC",L"F8",SS_CENTER|SS_CENTERIMAGE,90,660,36,24);theme::styleControl(f8,theme::Role::Badge);
@@ -403,10 +420,10 @@ void App::rebuildUIWithDraft() {
 aa::Workspace App::editorValues() {
     if(rebuilding||controls.empty())return workspace;
     auto changed=workspace;
-    if(page==3&&item(Validity))changed.validityMs=number(Validity,1,60000);
-    if(page==2)if(auto profile=byId(changed.sets,changed.activeSetId)) {
-        if(selectedRule>=0&&selectedRule<static_cast<int>(profile->rules.size())) {
-            auto& value=profile->rules[static_cast<std::size_t>(selectedRule)];
+    if(page==4&&item(Validity))changed.validityMs=number(Validity,1,60000);
+    if(page==2) {
+        if(selectedRule>=0&&selectedRule<static_cast<int>(changed.rules.size())) {
+            auto& value=changed.rules[static_cast<std::size_t>(selectedRule)];
             if(value.action.name.empty())value.action=value.condition;
             if(value.triggers.empty())value.triggers={{value.id+L"-trigger",value.statusId,value.sourceArea,value.condition,value.stackSamples,value.clockReferencePath}};
             selectedTrigger=std::clamp(selectedTrigger,0,static_cast<int>(value.triggers.size())-1);
@@ -429,7 +446,7 @@ aa::Workspace App::editorValues() {
                     if(stacks)trigger.condition.stacks=stacks;
                 }
             }
-            value.action.profile=profile->name;value.action.enabled=SendMessageW(item(Enabled),BM_GETCHECK,0,0)==BST_CHECKED;
+            value.action.profile.clear();value.action.enabled=true;
             value.onlyWhenReady=SendMessageW(item(OnlyWhenReady),BM_GETCHECK,0,0)==BST_CHECKED;
             if(trigger.kind==aa::TriggerKind::Status)value.followClock=trigger.condition.condition!=aa::Condition::Absent&&SendMessageW(item(FollowClock),BM_GETCHECK,0,0)==BST_CHECKED;
             value.targetArea=text(item(TargetArea));
@@ -481,12 +498,12 @@ void App::command(int id,int notification) {
     if(id==HudName&&notification==BN_CLICKED&&hud()){
         const auto name=requestName(*this,HudName);if(!name)return;
         auto changed=editorValues();byId(changed.huds,changed.activeHudId)->name=*name;
-        commit(std::move(changed));error=L"HUD renomeada.";makeUI();return;
+        stop();commit(std::move(changed));error=L"HUD renomeada.";makeUI();return;
     }
-    if(id==RenameArea&&notification==BN_CLICKED&&area()){const auto name=requestName(*this,RenameArea);if(!name)return;auto changed=editorValues();auto* layout=byId(changed.huds,changed.activeHudId);layout->areas[static_cast<std::size_t>(selectedArea)].name=*name;commit(std::move(changed));error=L"\u00c1rea renomeada.";makeUI();return;}
-    if(id==RenameStatus&&notification==BN_CLICKED&&selectedStatus()){const auto name=requestName(*this,RenameStatus);if(!name)return;auto changed=editorValues();byId(changed.statuses,selectedStatusId)->name=*name;commit(std::move(changed));error=L"Status renomeado.";makeUI();return;}
-    if(id==RenameSet&&notification==BN_CLICKED&&set()){const auto name=requestName(*this,RenameSet);if(!name)return;auto changed=editorValues();byId(changed.sets,changed.activeSetId)->name=*name;commit(std::move(changed));error=L"Perfil renomeado.";makeUI();return;}
-    if(id==RenameRule&&notification==BN_CLICKED&&rule()&&set()){const auto name=requestName(*this,RenameRule);if(!name)return;auto changed=editorValues();auto* profile=byId(changed.sets,changed.activeSetId);if(!profile)throw std::runtime_error("Perfil ativo ausente.");auto& value=profile->rules[static_cast<std::size_t>(selectedRule)];value.condition.name=*name;value.action.name=*name;commit(std::move(changed));error=L"Regra renomeada.";makeUI();return;}
+    if(id==RenameArea&&notification==BN_CLICKED&&area()){const auto name=requestName(*this,RenameArea);if(!name)return;auto changed=editorValues();auto* layout=byId(changed.huds,changed.activeHudId);layout->areas[static_cast<std::size_t>(selectedArea)].name=*name;stop();commit(std::move(changed));error=L"\u00c1rea renomeada.";makeUI();return;}
+    if(id==RenameStatus&&notification==BN_CLICKED&&selectedStatus()){const auto name=requestName(*this,RenameStatus);if(!name)return;auto changed=editorValues();byId(changed.statuses,selectedStatusId)->name=*name;stop();commit(std::move(changed));error=L"Status renomeado.";makeUI();return;}
+    if(id==RenameSet&&notification==BN_CLICKED&&set()){const auto name=requestName(*this,RenameSet);if(!name)return;auto changed=editorValues();byId(changed.sets,changed.activeSetId)->name=*name;stop();commit(std::move(changed));error=L"Perfil renomeado.";makeUI();return;}
+    if(id==RenameRule&&notification==BN_CLICKED&&rule()){const auto name=requestName(*this,RenameRule);if(!name)return;auto changed=editorValues();auto& value=changed.rules.at(static_cast<std::size_t>(selectedRule));value.condition.name=*name;value.action.name=*name;stop();commit(std::move(changed));error=L"Regra renomeada em todos os perfis.";makeUI();return;}
     if(id==ShareOverlay&&notification==BN_CLICKED){
         const bool visible=SendMessageW(item(ShareOverlay),BM_GETCHECK,0,0)==BST_CHECKED;
         if(visible&&running&&std::any_of(plan.actions.begin(),plan.actions.end(),[](const auto& action){return action.rule.onlyWhenReady;})){
@@ -509,18 +526,23 @@ void App::command(int id,int notification) {
     }
     if((notification==EN_CHANGE&&(id==Validity||id==HealthPercent))||
        (notification==CBN_SELCHANGE&&(id==TriggerKindBox||id==RuleStatus||id==ConditionBox||id==Stacks||id==EffectBox||id==Color||id==SourceArea||id==HealthArea||id==HealthComparisonBox||id==TargetArea))||
-        (notification==BN_CLICKED&&(id==Enabled||id==FollowClock||id==OnlyWhenReady))){
+        (notification==BN_CLICKED&&(id==FollowClock||id==OnlyWhenReady))){
         error=L"Alteração não salva.";refreshStatus();
     }
-    if(id==TriggerList&&notification==CBN_SELCHANGE){selectedTrigger=selection(item(TriggerList));error=L"Condicao selecionada.";makeUI();return;}
-    if((id==FollowClock||id==Enabled||id==OnlyWhenReady)&&notification==BN_CLICKED){updateRuleChoices();saveEditor();error=L"Alteração salva.";refreshStatus();return;}
+    if(id==TriggerList&&notification==CBN_SELCHANGE){saveEditor();selectedTrigger=selection(item(TriggerList));error=L"Condicao selecionada.";makeUI();return;}
+    if(id==Enabled&&notification==BN_CLICKED&&page==3&&set()&&selectedLink>=0){
+        auto changed=workspace;auto* profile=byId(changed.sets,changed.activeSetId);
+        stop();profile->rules.at(static_cast<std::size_t>(selectedLink)).enabled=SendMessageW(item(Enabled),BM_GETCHECK,0,0)==BST_CHECKED;
+        commit(std::move(changed));error=L"Ativação salva somente neste perfil.";makeUI();return;
+    }
+    if((id==FollowClock||id==OnlyWhenReady)&&notification==BN_CLICKED){updateRuleChoices();saveEditor();error=L"Alteração salva.";refreshStatus();return;}
     if(notification==CBN_SELCHANGE&&id==TriggerKindBox){
         const int requested=selection(item(TriggerKindBox));
         const int storedKind=rule()&&rule()->triggers.size()>static_cast<std::size_t>(selectedTrigger)&&rule()->triggers[static_cast<std::size_t>(selectedTrigger)].kind==aa::TriggerKind::Health?1:0;
         choose(item(TriggerKindBox),storedKind);
-        auto changed=editorValues();auto* profile=byId(changed.sets,changed.activeSetId);
-        if(!profile||selectedRule<0||selectedRule>=static_cast<int>(profile->rules.size()))return;
-        auto& trigger=profile->rules[static_cast<std::size_t>(selectedRule)].triggers[static_cast<std::size_t>(selectedTrigger)];
+        auto changed=editorValues();
+        if(selectedRule<0||selectedRule>=static_cast<int>(changed.rules.size()))return;
+        auto& trigger=changed.rules[static_cast<std::size_t>(selectedRule)].triggers[static_cast<std::size_t>(selectedTrigger)];
         trigger.kind=requested==1?aa::TriggerKind::Health:aa::TriggerKind::Status;
         if(trigger.kind==aa::TriggerKind::Health&&trigger.healthArea.empty())trigger.healthArea=trigger.sourceArea;
         stop();commit(std::move(changed));error=L"Tipo de condição salvo.";makeUI();return;
@@ -533,24 +555,25 @@ void App::command(int id,int notification) {
         (notification==LBN_SELCHANGE&&(id==StatusList||id==AreaList||id==RuleList));
     if(navigation) {
         const bool list=id==StatusList||id==AreaList||id==RuleList;const auto chosen=selection(item(id),list);
-        const int currentSelection=id==HudList?indexOf(workspace.huds,workspace.activeHudId):id==SetList?indexOf(workspace.sets,workspace.activeSetId):id==StatusList?indexOf(workspace.statuses,selectedStatusId):id==AreaList?selectedArea:selectedRule;
+        const int currentSelection=id==HudList?indexOf(workspace.huds,workspace.activeHudId):id==SetList?indexOf(workspace.sets,workspace.activeSetId):id==StatusList?indexOf(workspace.statuses,selectedStatusId):id==AreaList?selectedArea:page==3?selectedLink:selectedRule;
         if(chosen==currentSelection)return;
-        auto changed=workspace;const auto oldStatusId=selectedStatusId;const int oldArea=selectedArea,oldRule=selectedRule;
+        if(id==RuleList&&page==2)saveEditor();
+        auto changed=workspace;const auto oldStatusId=selectedStatusId;const int oldArea=selectedArea,oldRule=selectedRule,oldLink=selectedLink;
         if(id==HudList&&chosen>=0&&chosen<static_cast<int>(changed.huds.size())){changed.activeHudId=changed.huds[static_cast<std::size_t>(chosen)].id;selectedArea=-1;}
-        if(id==SetList&&chosen>=0&&chosen<static_cast<int>(changed.sets.size())){changed.activeSetId=changed.sets[static_cast<std::size_t>(chosen)].id;selectedRule=-1;}
+        if(id==SetList&&chosen>=0&&chosen<static_cast<int>(changed.sets.size())){changed.activeSetId=changed.sets[static_cast<std::size_t>(chosen)].id;selectedLink=-1;}
         if(id==StatusList&&chosen>=0&&chosen<static_cast<int>(changed.statuses.size()))selectedStatusId=changed.statuses[static_cast<std::size_t>(chosen)].id;
         if(id==AreaList)selectedArea=chosen;
-        if(id==RuleList){selectedRule=chosen;selectedTrigger=0;}
+        if(id==RuleList){if(page==3)selectedLink=chosen;else {selectedRule=chosen;selectedTrigger=0;}}
         try{commit(std::move(changed));}catch(...){
-            selectedStatusId=oldStatusId;selectedArea=oldArea;selectedRule=oldRule;
-            const int previous=id==HudList?indexOf(workspace.huds,workspace.activeHudId):id==SetList?indexOf(workspace.sets,workspace.activeSetId):id==StatusList?indexOf(workspace.statuses,selectedStatusId):id==AreaList?selectedArea:selectedRule;
+            selectedStatusId=oldStatusId;selectedArea=oldArea;selectedRule=oldRule;selectedLink=oldLink;
+            const int previous=id==HudList?indexOf(workspace.huds,workspace.activeHudId):id==SetList?indexOf(workspace.sets,workspace.activeSetId):id==StatusList?indexOf(workspace.statuses,selectedStatusId):id==AreaList?selectedArea:page==3?selectedLink:selectedRule;
             choose(item(id),previous,list);throw;
         }
         if(id==HudList||id==SetList)stop();
         error=L"Sele\u00e7\u00e3o atualizada.";makeUI();return;
     }
     if(notification!=BN_CLICKED)return;
-    if(id>=Tab0&&id<Tab0+4){if(page==id-Tab0)return;page=id-Tab0;if(page==3)capturePreview={};error=L"";makeUI();return;}
+    if(id>=Tab0&&id<Tab0+5){if(page==id-Tab0)return;if(page==2)saveEditor();page=id-Tab0;if(page==4)capturePreview={};error=L"";makeUI();return;}
     if(id==Stop){stop();error=L"Leitura parada. Os destaques estão apagados.";refreshStatus();return;}
     if(id==Connect){connect();refreshStatus();return;}
     if(id==Start){start();refreshStatus();return;}
@@ -566,8 +589,8 @@ void App::command(int id,int notification) {
     }
     if(id==Enabled){updateRuleChoices();return;}
     if(id==Save){
-        saveEditor();error=page==1?L"HUD e áreas salvas.":page==2?L"Status salvo na biblioteca.":page==3?L"Set e regras salvos.":L"Ajuste salvo.";
-        if(page==3&&rule()&&rule()->condition.condition==aa::Condition::StacksEqual) {
+        saveEditor();error=L"Ajuste salvo.";
+        if(page==2&&rule()&&rule()->condition.condition==aa::Condition::StacksEqual) {
             const auto currentStatus=byId(workspace.statuses,rule()->statusId);
             const auto values=currentStatus?aa::stackValues(*currentStatus):std::vector<unsigned>{};
             if(std::find(values.begin(),values.end(),rule()->condition.stacks)==values.end())error=L"Rascunho salvo. Cadastre uma amostra na aba Status antes de usar esta condição de stacks.";
@@ -575,14 +598,14 @@ void App::command(int id,int notification) {
         makeUI();return;
     }
     const bool action=id==NewHud||id==DeleteHud||id==NewArea||id==DeleteArea||id==SelectArea||id==CalibrateArea||id==NewStatus||id==DeleteStatus||
-        id==CaptureStatus||id==ImportStatus||id==CaptureStack||id==CaptureRuleStack||id==DeleteRuleStack||id==DeleteStack||id==AddPreset||id==NewSet||id==DeleteSet||id==NewRule||id==DeleteRule||id==MoveRuleUp||id==MoveRuleDown||id==NewTrigger||id==DeleteTrigger;
+         id==CaptureStatus||id==ImportStatus||id==CaptureStack||id==CaptureRuleStack||id==DeleteRuleStack||id==AddPreset||id==NewSet||id==DeleteSet||id==NewRule||id==DeleteRule||id==MoveRuleUp||id==MoveRuleDown||id==NewTrigger||id==DeleteTrigger||id==AddRuleToSet||id==RemoveRuleFromSet;
     if(!action)return;
     std::optional<std::wstring> newName;
     if(createsItem(id)){
         newName=requestName(*this,id);
         if(!newName)return;
     }
-    auto changed=workspace;stop();
+    auto changed=editorValues();stop();
     auto currentHud=byId(changed.huds,changed.activeHudId);auto currentSet=byId(changed.sets,changed.activeSetId);
     auto status=byId(changed.statuses,selectedStatusId);
     const auto oldStatusId=selectedStatusId;const int oldArea=selectedArea,oldRule=selectedRule;int focus=0;
@@ -664,8 +687,8 @@ void App::command(int id,int notification) {
         error=L"Amostra de "+std::to_wstring(value)+L" stacks salva.";break;
     }
     case CaptureRuleStack: {
-        if(!currentSet||selectedRule<0||selectedRule>=static_cast<int>(currentSet->rules.size()))throw std::runtime_error("Escolha uma regra primeiro.");
-        auto& currentRule=currentSet->rules[static_cast<std::size_t>(selectedRule)];
+        if(selectedRule<0||selectedRule>=static_cast<int>(changed.rules.size()))throw std::runtime_error("Escolha uma regra primeiro.");
+        auto& currentRule=changed.rules[static_cast<std::size_t>(selectedRule)];
         if(currentRule.triggers.empty())currentRule.triggers={{currentRule.id+L"-trigger",currentRule.statusId,currentRule.sourceArea,currentRule.condition,currentRule.stackSamples,currentRule.clockReferencePath}};
         auto& trigger=currentRule.triggers[static_cast<std::size_t>(std::clamp(selectedTrigger,0,static_cast<int>(currentRule.triggers.size())-1))];
         auto* ruleStatus=byId(changed.statuses,trigger.statusId);
@@ -680,8 +703,8 @@ void App::command(int id,int notification) {
         trigger.condition.stacks=value;error=L"Amostra de "+std::to_wstring(value)+L" stacks salva.";break;
     }
     case DeleteRuleStack: {
-        if(!currentSet||selectedRule<0||selectedRule>=static_cast<int>(currentSet->rules.size()))throw std::runtime_error("Escolha uma regra primeiro.");
-        auto& currentRule=currentSet->rules[static_cast<std::size_t>(selectedRule)];if(currentRule.triggers.empty())return;
+        if(selectedRule<0||selectedRule>=static_cast<int>(changed.rules.size()))throw std::runtime_error("Escolha uma regra primeiro.");
+        auto& currentRule=changed.rules[static_cast<std::size_t>(selectedRule)];if(currentRule.triggers.empty())return;
         auto& trigger=currentRule.triggers[static_cast<std::size_t>(std::clamp(selectedTrigger,0,static_cast<int>(currentRule.triggers.size())-1))];
         const auto value=trigger.condition.stacks;std::erase_if(trigger.stackSamples,[&](const auto& sample){return sample.value==value;});
         error=L"Amostra de "+std::to_wstring(value)+L" stacks excluida.";break;
@@ -696,25 +719,24 @@ void App::command(int id,int notification) {
     case NewSet: {
         if(changed.sets.size()>=64)throw std::runtime_error("O limite é de 64 sets. Exclua um set para criar outro.");
         aa::SetProfile value;value.id=aa::newId(changed);value.name=*newName;changed.activeSetId=value.id;
-        changed.sets.push_back(std::move(value));selectedRule=-1;focus=0;error=L"Perfil criado. Adicione uma regra.";break;
+        changed.sets.push_back(std::move(value));selectedLink=-1;focus=0;error=L"Perfil criado. Adicione uma regra da biblioteca.";break;
     }
     case DeleteSet:
         if(!currentSet)return;
-        if(MessageBoxW(window,(L"Excluir o set “"+currentSet->name+L"” e suas regras?\nAs HUDs e a biblioteca de status serão preservadas.").c_str(),L"Excluir set",MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2)!=IDYES)return;
-        aa::eraseSet(changed,currentSet->id);selectedRule=-1;error=L"Set excluído. HUDs e status preservados.";break;
+        if(MessageBoxW(window,(L"Excluir o perfil “"+currentSet->name+L"” e seus vínculos?\nAs regras da biblioteca serão preservadas.").c_str(),L"Excluir perfil",MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2)!=IDYES)return;
+        aa::eraseSet(changed,currentSet->id);selectedLink=-1;error=L"Perfil excluído. Regras preservadas na biblioteca.";break;
     case NewRule: {
-        if(!currentSet)throw std::runtime_error("Crie um perfil antes de adicionar regras.");
-        if(currentSet->rules.size()>=32)throw std::runtime_error("O limite e de 32 regras por perfil.");
+        if(changed.rules.size()>=2048)throw std::runtime_error("O limite é de 2048 regras na biblioteca.");
         aa::StatusRule value;value.id=aa::newId(changed);value.condition.name=*newName;
-        value.condition.profile=currentSet->name;value.condition.condition=aa::Condition::Present;value.condition.stacks=1;
+        value.condition.condition=aa::Condition::Present;value.condition.stacks=1;
         if(!changed.statuses.empty())value.statusId=changed.statuses.front().id;
         if(currentHud&&!currentHud->areas.empty()){value.sourceArea=currentHud->areas.front().name;value.targetArea=currentHud->areas.back().name;}
         value.action=value.condition;value.triggers={{value.id+L"-trigger",value.statusId,value.sourceArea,value.condition,{},L""}};
-        currentSet->rules.push_back(std::move(value));selectedRule=static_cast<int>(currentSet->rules.size())-1;selectedTrigger=0;focus=RenameRule;error=L"Regra criada. Configure a condicao e o destaque.";break;
+        changed.rules.push_back(std::move(value));selectedRule=static_cast<int>(changed.rules.size())-1;selectedTrigger=0;focus=0;error=L"Regra criada na biblioteca. Configure-a e adicione-a aos perfis desejados.";break;
     }
     case NewTrigger: {
-        if(!currentSet||selectedRule<0||selectedRule>=static_cast<int>(currentSet->rules.size()))return;
-        auto& value=currentSet->rules[static_cast<std::size_t>(selectedRule)];
+        if(selectedRule<0||selectedRule>=static_cast<int>(changed.rules.size()))return;
+        auto& value=changed.rules[static_cast<std::size_t>(selectedRule)];
         if(value.triggers.empty())value.triggers={{value.id+L"-trigger",value.statusId,value.sourceArea,value.condition,value.stackSamples,value.clockReferencePath}};
         if(value.triggers.size()>=32)throw std::runtime_error("Uma regra aceita no maximo 32 condicoes.");
         auto copy=value.triggers[static_cast<std::size_t>(std::clamp(selectedTrigger,0,static_cast<int>(value.triggers.size())-1))];
@@ -722,17 +744,34 @@ void App::command(int id,int notification) {
         value.triggers.push_back(copy);selectedTrigger=static_cast<int>(value.triggers.size())-1;error=L"Condicao alternativa adicionada. Qualquer uma ativa este destaque.";break;
     }
     case DeleteTrigger: {
-        if(!currentSet||selectedRule<0||selectedRule>=static_cast<int>(currentSet->rules.size()))return;
-        auto& value=currentSet->rules[static_cast<std::size_t>(selectedRule)];if(value.triggers.size()<=1)throw std::runtime_error("A regra precisa manter uma condicao.");
+        if(selectedRule<0||selectedRule>=static_cast<int>(changed.rules.size()))return;
+        auto& value=changed.rules[static_cast<std::size_t>(selectedRule)];if(value.triggers.size()<=1)throw std::runtime_error("A regra precisa manter uma condicao.");
         value.triggers.erase(value.triggers.begin()+std::clamp(selectedTrigger,0,static_cast<int>(value.triggers.size())-1));
         selectedTrigger=std::min(selectedTrigger,static_cast<int>(value.triggers.size())-1);error=L"Condicao alternativa removida.";break;
     }
     case DeleteRule:
-        if(!currentSet||!rule())return;currentSet->rules.erase(currentSet->rules.begin()+selectedRule);selectedRule=-1;error=L"Regra excluída.";break;
+        if(!rule())return;
+        aa::eraseRule(changed,rule()->id);selectedRule=-1;error=L"Regra excluída da biblioteca.";break;
+    case AddRuleToSet: {
+        if(!currentSet)throw std::runtime_error("Crie um perfil primeiro.");
+        if(currentSet->rules.size()>=32)throw std::runtime_error("O limite é de 32 regras por perfil.");
+        const auto index=selection(item(AvailableRule));if(index<0)return;
+        std::vector<std::wstring> candidates;
+        for(const auto& definition:changed.rules)
+            if(std::none_of(currentSet->rules.begin(),currentSet->rules.end(),[&](const auto& link){return link.ruleId==definition.id;}))candidates.push_back(definition.id);
+        if(static_cast<std::size_t>(index)>=candidates.size())return;
+        currentSet->rules.push_back({candidates[static_cast<std::size_t>(index)],true});
+        selectedLink=static_cast<int>(currentSet->rules.size())-1;error=L"Regra vinculada a este perfil.";break;
+    }
+    case RemoveRuleFromSet:
+        if(!currentSet||selectedLink<0||selectedLink>=static_cast<int>(currentSet->rules.size()))return;
+        currentSet->rules.erase(currentSet->rules.begin()+selectedLink);selectedLink=-1;
+        error=L"Regra removida deste perfil; permanece na biblioteca e nos demais perfis.";break;
     case MoveRuleUp:case MoveRuleDown: {
-        if(!currentSet||!rule())return;const int next=selectedRule+(id==MoveRuleUp?-1:1);
+        if(!currentSet||selectedLink<0||selectedLink>=static_cast<int>(currentSet->rules.size()))return;
+        const int next=selectedLink+(id==MoveRuleUp?-1:1);
         if(next<0||next>=static_cast<int>(currentSet->rules.size()))return;
-        std::swap(currentSet->rules[static_cast<std::size_t>(selectedRule)],currentSet->rules[static_cast<std::size_t>(next)]);selectedRule=next;error=L"Prioridade da regra atualizada.";break;
+        std::swap(currentSet->rules[static_cast<std::size_t>(selectedLink)],currentSet->rules[static_cast<std::size_t>(next)]);selectedLink=next;error=L"Prioridade da regra atualizada neste perfil.";break;
     }
     default:return;
     }
@@ -751,14 +790,14 @@ void App::refreshStatus() {
         else if(!error.empty())state=L"Leitura: "+error;
         else state=L"Leitura ativa. Cada status é acompanhado na área indicada abaixo.";
     }
-    else if(page==3&&error.starts_with(L"Antes de iniciar:"))state=L"Leitura não iniciada. Veja as pendências em Leituras e destaques.";
+    else if(page==4&&error.starts_with(L"Antes de iniciar:"))state=L"Leitura não iniciada. Veja as pendências em Monitorar.";
     if(!hotkeyWarning.empty())state+=L"\n"+hotkeyWarning;
     setIfChanged(statusLabel,state);
-    if(page!=3)return;
+    if(page!=4)return;
     EnableWindow(item(Start),!running);EnableWindow(item(Stop),running||previewUntil!=0);
     std::wstring summary;
     if(!running) {
-        summary=L"Escolha uma HUD e um set. Configure áreas em HUDs, imagens em Status e condições em Sets e regras.\r\n";
+        summary=L"Escolha uma HUD e um perfil. Configure áreas em HUDs, imagens em Status e condições em Regras.\r\n";
         if(target&&IsWindow(target)) {
             try{auto screen=screenOf(target);summary+=L"Jogo conectado: "+std::to_wstring(screen.width)+L" × "+std::to_wstring(screen.height)+L" px.\r\n";}catch(const std::exception&){summary+=L"Janela do jogo indisponível. Conecte novamente.\r\n";}
         } else summary+=L"Jogo ainda não conectado.\r\n";
@@ -834,9 +873,9 @@ void App::paint() {
     theme::frame(dc,{px(12),px(128),px(848),px(613)},RGB(39,44,53));
     theme::frame(dc,{px(12),px(619),px(848),px(654)},RGB(54,48,49));
     theme::fill(dc,{px(12),px(619),px(15),px(654)},theme::Accent);
-    if(page==3||(page==1&&selectedStatus())||(page==0&&area()&&area()->region.valid())) {
-        const auto& preview=page==3?capturePreview:page==0?skillPreview:referencePreview;
-        const RECT bounds=page==3?RECT{px(24),px(486),px(832),px(602)}:page==0?RECT{px(551),px(479),px(631),px(559)}:RECT{px(282),px(330),px(544),px(481)};
+    if(page==4||(page==1&&selectedStatus())||(page==0&&area()&&area()->region.valid())) {
+        const auto& preview=page==4?capturePreview:page==0?skillPreview:referencePreview;
+        const RECT bounds=page==4?RECT{px(24),px(486),px(832),px(602)}:page==0?RECT{px(551),px(479),px(631),px(559)}:RECT{px(282),px(330),px(544),px(481)};
         theme::fill(dc,bounds,theme::Field);theme::frame(dc,bounds,theme::Border);
         if(preview.valid()) {
             const auto factor=std::min(static_cast<double>(bounds.right-bounds.left)/preview.width,static_cast<double>(bounds.bottom-bounds.top)/preview.height);
@@ -846,7 +885,7 @@ void App::paint() {
             SetStretchBltMode(dc,COLORONCOLOR);StretchDIBits(dc,bounds.left+(bounds.right-bounds.left-width)/2,bounds.top+(bounds.bottom-bounds.top-height)/2,width,height,0,0,preview.width,preview.height,preview.bgra.data(),&info,DIB_RGB_COLORS,SRCCOPY);
         } else {
             SetBkMode(dc,TRANSPARENT);SetTextColor(dc,theme::Muted);SelectObject(dc,font);auto message=bounds;
-            DrawTextW(dc,page==3?(running?L"Aguardando a primeira captura do jogo...":L"Sem captura. Inicie a leitura após resolver as pendências."):page==0?L"Sem imagem":L"Cadastre uma imagem de referência.",-1,&message,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+            DrawTextW(dc,page==4?(running?L"Aguardando a primeira captura do jogo...":L"Sem captura. Inicie a leitura após resolver as pendências."):page==0?L"Sem imagem":L"Cadastre uma imagem de referência.",-1,&message,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
         }
     }
     RestoreDC(dc,saved);

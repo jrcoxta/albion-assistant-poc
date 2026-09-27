@@ -25,7 +25,7 @@ enum Id {
     SampleValue, CaptureStack, StackList, DeleteStack, AddPreset,
     SetList, SetName, NewSet, DeleteSet, RuleList, RuleName, NewRule, DeleteRule,
     RuleStatus, SourceArea, TargetArea, ConditionBox, Stacks, EffectBox, Color, Enabled,
-    MoveRuleUp, MoveRuleDown, RenameRule, RenameArea, RenameStatus, RenameSet, TriggerList, NewTrigger, DeleteTrigger, Validity, SampleColor, FollowClock, CaptureClock, ClockHint, ShareOverlay, CaptureRuleStack, DeleteRuleStack, CalibrateHealth, TriggerKindBox, HealthArea, HealthComparisonBox, HealthPercent, CaptureReadySkill, OnlyWhenReady, ConfirmReadySkill, Tab0=250
+    MoveRuleUp, MoveRuleDown, RenameRule, RenameArea, RenameStatus, RenameSet, TriggerList, NewTrigger, DeleteTrigger, Validity, SampleColor, FollowClock, CaptureClock, ClockHint, ShareOverlay, CaptureRuleStack, DeleteRuleStack, CalibrateHealth, TriggerKindBox, HealthArea, HealthComparisonBox, HealthPercent, CaptureReadySkill, OnlyWhenReady, ConfirmReadySkill, AddRuleToSet, RemoveRuleFromSet, AvailableRule, Tab0=250
 };
 std::wstring widen(const std::string& value);
 std::string utf8(const std::wstring& value);
@@ -45,7 +45,7 @@ struct App {
     HFONT font{}, titleFont{};
     std::filesystem::path directory, settingsPath, workspacePath;
     aa::Workspace workspace;
-    int page=0, selectedArea=-1, selectedRule=-1, selectedTrigger=0;
+    int page=0, selectedArea=-1, selectedRule=-1, selectedTrigger=0, selectedLink=-1;
     std::wstring selectedStatusId;
     double dpi=1;
     bool rebuilding=false, selecting=false, running=false;

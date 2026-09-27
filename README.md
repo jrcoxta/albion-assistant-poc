@@ -1,6 +1,6 @@
 # Albion Assistant
 
-Aplicativo Windows x64 para acompanhar buffs/debuffs pela imagem do jogo e destacar áreas conforme regras configuráveis. HUDs guardam a configuração da tela; sets guardam as regras; status ficam em uma biblioteca compartilhada.
+Aplicativo Windows x64 para acompanhar buffs/debuffs pela imagem do jogo e destacar áreas conforme regras configuráveis. HUDs guardam a configuração da tela; status e regras ficam em bibliotecas compartilhadas; perfis selecionam as regras do set.
 
 ## Executar
 
@@ -8,11 +8,12 @@ Abra **`dist/AlbionAssistant.exe`**. É o único arquivo necessário para usar o
 
 Para criar uma HUD, área, status, set ou regra, clique em **Novo**, informe o nome e confirme em **Criar** ou Enter. Esc ou Cancelar fecha sem criar nada nem perder uma edição anterior. Nomes vazios ou repetidos são explicados no próprio cadastro. Ao editar um item existente, o rodapé avisa que há alterações pendentes; **Salvar** ou trocar de item/seção grava a edição.
 
-1. Abra o Albion em janela ou janela sem bordas. Em **Monitor → Conectar ao jogo**, conecte à janela.
-2. Em **HUDs**, escolha uma HUD ou crie outra. Adicione áreas com nomes claros, como “Meus status” e “Habilidade E”. Em **Selecionar área**, escolha **Retângulo** (dois cantos) ou **Círculo** (centro e raio), sempre por dois cliques separados, e confirme. Essa forma fica salva na área e define também o formato de seu destaque. Para receber destaque, basta selecionar a área da habilidade; não é preciso medir seu ícone. Nas áreas usadas para buscar status, **Medir ícone de status** pede um recorte justo de um único ícone inteiro. A medição aparece como opcional enquanto a área não estiver ligada a uma regra. Os usos indicados consideram as regras de todos os sets. Esc cancela; F2 move o painel de seleção.
+1. Abra o Albion em janela ou janela sem bordas. Em **Monitorar → Conectar**, conecte à janela.
+2. Em **HUDs**, escolha uma HUD ou crie outra. Adicione áreas com nomes claros, como “Meus status” e “Habilidade E”. Em **Selecionar área**, escolha **Retângulo** (dois cantos) ou **Círculo** (centro e raio), sempre por dois cliques separados, e confirme. Essa forma fica salva na área e define também o formato de seu destaque. Para receber destaque, basta selecionar a área da habilidade; não é preciso medir seu ícone. Nas áreas usadas para buscar status, **Medir ícone de status** pede um recorte justo de um único ícone inteiro. A medição aparece como opcional enquanto a área não estiver ligada a uma regra. Os usos indicados consideram as regras da biblioteca. Esc cancela; F2 move o painel de seleção.
 3. Em **Status → Novo status**, dê um nome. **Capturar referência** permite selecionar o ícone do jogo; **Importar imagem** aceita um recorte existente.
-4. Em **Sets e regras**, crie um set e suas regras. Escolha o status, a área onde ele aparece, a condição (presente, ausente ou quantidade exata de stacks), a área de destino e o destaque: **Borda**, **Brilho**, **Pulso**, **Halo** ou **Chamas**. Ao escolher stacks, informe o valor em **Nova amostra** e clique em **Capturar amostra** enquanto esse número estiver visível no ícone. Inclua o número completo na prévia. Presença e ausência dispensam essa captura. Escolha uma cor da paleta ou use **Cor da habilidade** para capturar a cor predominante da área de destino no jogo. A captura é pontual: repita o botão se quiser atualizar a cor. Se o ícone estiver escuro ou sem cor nítida, a cor anterior é mantida. A frase abaixo dos campos resume a ação. Você pode reordenar ou desativar regras.
-5. **Testar destaque por 5 s** mostra somente a ação, com aviso TESTE e leitura pausada. Depois, em **Monitor**, escolha HUD e set e use **Iniciar leitura**. O painel mostra cada leitura e o estado das ações.
+4. Em **Regras**, crie cada regra uma vez. Escolha status ou vida, a origem, a condição (presente, ausente ou quantidade exata de stacks), a área de destino e **Borda**, **Brilho**, **Pulso**, **Halo** ou **Chamas**. Para stacks, capture a amostra enquanto o número está visível no ícone. Presença e ausência dispensam essa captura. A cor pode ser escolhida na paleta ou capturada da habilidade. Editar a regra altera seu comportamento em todos os perfis que a utilizam.
+5. Em **Perfis**, crie um perfil para cada set e use **Adicionar ao perfil** para vincular regras existentes. A ordem define a prioridade; **Ativada neste perfil** vale somente para ele. **Remover do perfil** conserva a regra na biblioteca. Excluir o perfil também conserva as regras. Para excluir uma regra da biblioteca, remova primeiro seus vínculos em todos os perfis.
+6. **Testar destaque** mostra somente a ação por 5 s, com aviso de simulação. Depois, em **Monitorar**, escolha HUD e perfil e use **Iniciar**. O painel mostra cada leitura e o estado das ações.
 
 F8 abre o painel; F9 inicia ou para a leitura. O destaque apaga quando o jogo perde foco ou a informação fica incerta/expirada. O padrão de validade é 750 ms.
 
@@ -38,15 +39,17 @@ As configurações ficam em **`%LOCALAPPDATA%\AlbionAssistant`**: `workspace.ini
 
 Na primeira abertura, `settings.ini` e `hud-profiles` da versão anterior são importados automaticamente, sem alterar os originais. HUDs e regras divergentes são preservadas separadamente. Os contadores 2/3 que a configuração anterior usava são mantidos como amostras explícitas dos status importados. Cadastros novos não herdam essas amostras. Depois de criado `workspace.ini`, a importação não se repete; excluir a última HUD não a faz reaparecer.
 
+Workspaces das versões anteriores (schemas 1–5) são abertos sem apagar o arquivo original. Cada regra antiga ganha uma definição própria na biblioteca e o perfil mantém seu vínculo, a ordem e a ativação. Regras antigas com o mesmo nome em perfis diferentes recebem sufixos; a aplicação não as une automaticamente. Ao salvar, o workspace passa ao schema 6 por substituição atômica.
+
 Quem ainda tiver dados de um build antigo ao lado do EXE deve fechar o aplicativo e copiar `settings.ini`, `hud-profiles` e as referências personalizadas para a pasta de dados antes de usar o executável atual. Não sobrescreva arquivos/perfis já existentes: preserve os originais e confira as referências pelo painel. Não há importação automática de pastas antigas. Os dados deste ambiente já foram migrados durante a consolidação.
 
 Salve uma HUD para cada resolução/layout, por exemplo “Notebook” e “Monitor 34”. HUDs guardam posições, formas, tamanho dos ícones, resolução, monitor e DPI conhecidos. Áreas antigas continuam retangulares até serem selecionadas novamente em outro formato. A mudança de layout dentro do jogo exige nova seleção ou troca manual de HUD. Uma tela incompatível apaga os destaques e exige a escolha da HUD correspondente.
 
 Origem e destino têm formas independentes: uma faixa retangular de status pode acionar um círculo sobre o E. Na busca circular, enquadre o ícone inteiro; candidatos com o centro fora do círculo são ignorados. A imagem capturada continua incluindo o quadrado delimitador para preservar o contador nos cantos.
 
-Use os mesmos nomes de áreas em HUDs diferentes para reutilizar um set. Trocar de set mantém a HUD; trocar de HUD mantém o set. Renomear uma área exige atualizar as regras que a referenciam. Dependências ausentes são mostradas no Monitor e bloqueiam a leitura, em vez de ignorar regras silenciosamente.
+Use os mesmos nomes de áreas em HUDs diferentes para reutilizar as regras. Trocar de perfil mantém a HUD; trocar de HUD mantém o perfil. Renomear uma área exige atualizar as regras que a referenciam. Dependências ausentes são mostradas em Monitorar e bloqueiam a leitura, em vez de ignorar regras silenciosamente.
 
-As edições são salvas antes de trocar de página ou seleção; há também botões de salvar. **Excluir HUD** remove apenas a HUD e suas áreas, após confirmação. **Excluir set** remove suas regras e preserva a biblioteca. Um status utilizado por regras precisa ser desvinculado antes da exclusão. As amostras embutidas do exemplo 2/3 são fixas; capture outra referência para substituí-las por amostras próprias.
+As edições são salvas antes de trocar de página ou seleção. **Excluir HUD** remove apenas a HUD e suas áreas, após confirmação. **Excluir perfil** conserva as regras da biblioteca. Um status utilizado por qualquer regra, mesmo avulsa, exige excluir ou editar a regra dependente antes de remover o status. As amostras embutidas do exemplo 2/3 são fixas; capture outra referência para substituí-las por amostras próprias.
 
 ## Desenvolvimento
 
@@ -79,7 +82,7 @@ Os presets `windows-release` e `windows-debug` em `CMakePresets.json` também po
 
 ## Limites da POC
 
-Cada set aceita até 32 regras; cada HUD, até 32 áreas. A biblioteca aceita até 64 status e amostras rotuladas de **1 a 99 stacks**. Esses números são rótulos de imagens cadastradas, não OCR universal: o usuário precisa capturar o contador visível. A leitura espera ícones com contador branco no canto inferior direito, como nas amostras do Albion. Recortes têm entre 24 e 256 pixels. Contador ilegível permanece desconhecido; ausência de número não significa 1. O acompanhamento opcional do relógio estima somente uma fração visual, sem cálculo de segundos restantes.
+Cada perfil aceita até 32 vínculos de regras; cada HUD, até 32 áreas. A biblioteca aceita até 2.048 regras, 64 status e amostras rotuladas de **1 a 99 stacks**. Esses números são rótulos de imagens cadastradas, não OCR universal: o usuário precisa capturar o contador visível. A leitura espera ícones com contador branco no canto inferior direito, como nas amostras do Albion. Recortes têm entre 24 e 256 pixels. Contador ilegível permanece desconhecido; ausência de número não significa 1. O acompanhamento opcional do relógio estima somente uma fração visual, sem cálculo de segundos restantes.
 
 Vários status são acompanhados no mesmo ciclo; regras do mesmo status na mesma área compartilham a leitura. Cada ação usa sua própria condição. Se duas regras verdadeiras usam a mesma área de destino, vence a primeira na lista. Borda e Halo contornam a forma selecionada com centro transparente. Brilho cria uma aura translúcida sobre a habilidade e ao redor dela; Pulso varia suavemente essa intensidade. Chamas combina línguas de luz e faíscas que percorrem o contorno, podendo sair até 32 px da área selecionada, sem esconder o centro; sua animação é atualizada pelo timer da interface. Todos permitem clicar na habilidade. A captura de cor não aumenta a área de leitura contínua.
 
