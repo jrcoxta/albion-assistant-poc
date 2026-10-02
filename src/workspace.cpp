@@ -63,6 +63,14 @@ bool inBounds(const HudLayout& hud, const Region& r) {
            static_cast<std::int64_t>(r.y) + r.height <= hud.clientHeight;
 }
 bool emptyRegion(const Region& r) { return r.x == 0 && r.y == 0 && r.width == 0 && r.height == 0; }
+std::string utf8Description(const std::wstring& value) {
+    const auto length=WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,value.data(),static_cast<int>(value.size()),nullptr,0,nullptr,nullptr);
+    if(length<=0)return "[texto indisponivel]";
+    std::string result(static_cast<std::size_t>(length),'\0');
+    if(WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,value.data(),static_cast<int>(value.size()),result.data(),length,nullptr,nullptr)!=length)
+        return "[texto indisponivel]";
+    return result;
+}
 void validate(const Workspace& w) {
     require(w.nextId > 0 && w.validityMs >= 1 && w.validityMs <= 60000, "Parametros do workspace invalidos.");
     require(w.huds.size() <= entityLimit && w.statuses.size() <= entityLimit && w.sets.size() <= entityLimit &&
@@ -138,8 +146,8 @@ void validate(const Workspace& w) {
         Names links;
         for (const auto& link : set.rules) {
             idValid(link.ruleId);
-            require(byId(w.rules, link.ruleId) != nullptr && links.insert(link.ruleId).second,
-                    "Vinculo de regra inexistente ou duplicado no perfil.");
+            if(!byId(w.rules,link.ruleId))throw std::invalid_argument("Perfil \""+utf8Description(set.name)+"\" referencia regra inexistente: "+utf8Description(link.ruleId));
+            if(!links.insert(link.ruleId).second)throw std::invalid_argument("Perfil \""+utf8Description(set.name)+"\" repete a regra: "+utf8Description(link.ruleId));
         }
     }
     idValid(w.activeHudId, true); idValid(w.activeSetId, true);
@@ -227,7 +235,7 @@ struct IniReader {
 std::wstring indexed(const std::wstring& prefix, std::size_t index) { return prefix + L"." + std::to_wstring(index); }
 std::wstring boundedName(const std::wstring& value, std::size_t limit);
 
-Workspace readWorkspace(const std::filesystem::path& file) {
+Workspace readWorkspace(const std::filesystem::path& file,unsigned* storedSchema=nullptr) {
     IniReader in(file);
     const auto schema=in.number(L"workspace", L"schema", 6);
     require(schema>=1&&schema<=6, "Schema de workspace nao suportado.");
@@ -346,7 +354,6 @@ Workspace readWorkspace(const std::filesystem::path& file) {
             else {
                 auto r=readRule(child);
                 const bool enabled=r.action.enabled;
-                r.condition.profile.clear(); r.action.profile.clear();
                 auto name=r.condition.name;
                 for(unsigned suffix=2;std::any_of(w.rules.begin(),w.rules.end(),[&](const auto& other){return sameName(other.condition.name,r.condition.name);});++suffix) {
                     const auto tail=L" ("+std::to_wstring(suffix)+L")";
@@ -358,7 +365,9 @@ Workspace readWorkspace(const std::filesystem::path& file) {
         }
         w.sets.push_back(std::move(s));
     }
-    in.finish(); validate(w); return w;
+    in.finish(); validate(w);
+    if(storedSchema)*storedSchema=schema;
+    return w;
 }
 std::wstring boundedName(const std::wstring& value, std::size_t limit) {
     auto result = value.substr(0, limit);
@@ -585,7 +594,35 @@ void saveWorkspace(const std::filesystem::path& file, const Workspace& w) {
         const auto flush = CreateFileW(temporary.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (flush == INVALID_HANDLE_VALUE) throw std::runtime_error("Nao foi possivel verificar a gravacao do workspace.");
         const bool flushed = FlushFileBuffers(flush) != FALSE; CloseHandle(flush);
-        if (!flushed || !MoveFileExW(temporary.c_str(), full.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        if (!flushed) throw std::runtime_error("Nao foi possivel concluir a gravacao do workspace.");
+        // O EXE anterior nao abre o schema 6. Antes da primeira conversao, guardar
+        // os bytes originais para permitir voltar ao EXE anterior sem refazer HUDs.
+        if (std::filesystem::exists(full)) {
+            unsigned previousSchema=0;
+            // Se o arquivo foi alterado/corrompido desde a abertura, nao o
+            // substituir. O mesmo parser decide a versao e valida todo o arquivo,
+            // inclusive valores numericos com zeros a esquerda.
+            (void)readWorkspace(full,&previousSchema);
+            if(previousSchema<=5) {
+                const auto prefix=full.wstring()+L".before-schema6";
+                for(unsigned suffix=0;;++suffix) {
+                    const auto backup=prefix+(suffix?L"-"+std::to_wstring(suffix):L"")+L".ini";
+                    if(!CopyFileW(full.c_str(),backup.c_str(),TRUE)) {
+                        const auto reason=GetLastError();
+                        if((reason==ERROR_FILE_EXISTS||reason==ERROR_ALREADY_EXISTS)&&suffix<9999)continue;
+                        throw std::runtime_error("Nao foi possivel guardar uma copia do workspace antigo; o original foi mantido.");
+                    }
+                    // A copia so habilita a substituicao depois de ser legivel e duravel.
+                    (void)readWorkspace(backup);
+                    const auto stored=CreateFileW(backup.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+                    if(stored==INVALID_HANDLE_VALUE)throw std::runtime_error("Nao foi possivel verificar a copia do workspace antigo.");
+                    const bool safe=FlushFileBuffers(stored)!=FALSE;CloseHandle(stored);
+                    if(!safe)throw std::runtime_error("Nao foi possivel concluir a copia do workspace antigo.");
+                    break;
+                }
+            }
+        }
+        if (!MoveFileExW(temporary.c_str(), full.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
             throw std::runtime_error("Nao foi possivel substituir o workspace.");
         WritePrivateProfileStringW(nullptr, nullptr, nullptr, full.c_str());
     } catch (...) { DeleteFileW(temporary.c_str()); throw; }
@@ -615,12 +652,7 @@ void eraseRule(Workspace& w,const std::wstring& id) {
         if(!owners.empty())owners+=L", ";owners+=set.name;break;
     }
     if(!owners.empty()){
-        const int length=WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,owners.data(),static_cast<int>(owners.size()),nullptr,0,nullptr,nullptr);
-        if(length<=0)throw std::invalid_argument("Nao foi possivel listar os perfis desta regra.");
-        std::string names(static_cast<std::size_t>(length),'\0');
-        if(WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,owners.data(),static_cast<int>(owners.size()),names.data(),length,nullptr,nullptr)!=length)
-            throw std::invalid_argument("Nao foi possivel listar os perfis desta regra.");
-        throw std::invalid_argument("Remova a regra dos perfis antes de exclui-la: "+names);
+        throw std::invalid_argument("Remova a regra dos perfis antes de exclui-la: "+utf8Description(owners));
     }
     std::erase_if(w.rules,[&](const auto& rule){return rule.id==id;});
 }

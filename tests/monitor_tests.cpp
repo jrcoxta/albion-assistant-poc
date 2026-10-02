@@ -1,5 +1,6 @@
 #include "monitor.h"
 #include <algorithm>
+#include <chrono>
 #include <stdexcept>
 #include <iostream>
 namespace {
@@ -12,6 +13,24 @@ aa::StatusRule& linked(aa::Workspace& w,std::size_t index){
     auto found=std::find_if(w.rules.begin(),w.rules.end(),[&](const auto& value){return value.id==id;});
     if(found==w.rules.end())throw std::runtime_error("Regra do perfil inexistente.");
     return *found;
+}
+void measureEvaluation(const char* label,const aa::MonitorPlan& plan) {
+    aa::Observation reading;reading.detection.presence=aa::Presence::Present;
+    reading.detection.stacks=3;reading.capturedMs=1000;reading.source=7;
+    const std::vector<aa::Observation> observations(plan.readers.size(),reading);
+    std::vector<double> micros;micros.reserve(400);
+    std::size_t active=0;
+    for(int iteration=0;iteration<450;++iteration){
+        const auto start=std::chrono::steady_clock::now();
+        const auto result=aa::evaluateMonitor(plan,observations,1000,750,7);
+        const auto finished=std::chrono::steady_clock::now();
+        active+=static_cast<std::size_t>(std::count(result.begin(),result.end(),true));
+        if(iteration>=50)micros.push_back(std::chrono::duration<double,std::micro>(finished-start).count());
+    }
+    std::sort(micros.begin(),micros.end());
+    std::cout<<"benchmark monitor "<<label<<": leitores="<<plan.readers.size()<<" acoes="<<plan.actions.size()
+             <<" mediana="<<micros[micros.size()/2]<<" us p95="<<micros[micros.size()*95/100]
+             <<" us ("<<active<<" acionamentos de controle)\n";
 }
 }
 int main(){try{
@@ -92,6 +111,17 @@ int main(){try{
         const auto guardedPlan=aa::makeMonitorPlan(guarded);
         require(guardedPlan.captureArea.y+guardedPlan.captureArea.height==540,
                 "captura nao incluiu a habilidade de destino");
+        auto repeated=guardedPlan;repeated.actions[2].rule.onlyWhenReady=true;
+        const auto owners=aa::readyComparisonSources(repeated);
+        require(owners.size()==3&&owners[0]==0&&owners[1]==1&&owners[2]==0,
+                "duas regras da mesma habilidade repetiram comparacao por frame");
+        repeated.actions[2].rule.targetArea=L"Outra referencia no mesmo pixel";
+        require(aa::readyComparisonSources(repeated)[2]==2,
+                "areas diferentes no mesmo pixel herdaram referencia de habilidade alheia");
+        repeated.actions[2].rule.targetArea=repeated.actions[0].rule.targetArea;
+        ++repeated.actions[2].target.x;
+        require(aa::readyComparisonSources(repeated)[2]==2,
+                "posicao divergente compartilhou comparacao de habilidade pronta");
         require(aa::evaluateMonitor(guardedPlan,obs,1000,750,7)==std::vector<bool>({false,false,false}),
                 "regra seguinte acendeu a habilidade em cooldown");
         const std::vector<bool> ready{true,false,false};
@@ -194,6 +224,16 @@ int main(){try{
         require(!aa::evaluateMonitor(healthPlan,healthReadings,1000,750,7)[0],"vida incerta ativou a regra");
         healthReadings[lifeIndex].healthFraction=.50f;
         require(!aa::evaluateMonitor(healthPlan,healthReadings,1000,750,7)[0],"vida nova sem limiar reutilizou a histerese incerta");
+        healthReadings[lifeIndex].healthFraction=.49f;
+        require(aa::evaluateMonitor(healthPlan,healthReadings,1749,750,7)[0],"vida ainda valida nao ativou a regra");
+        require(!aa::evaluateMonitor(healthPlan,healthReadings,1750,750,7)[0],"vida no limite da validade manteve destaque");
+        healthReadings[lifeIndex].healthFraction=.50f;
+        require(!aa::evaluateMonitor(healthPlan,healthReadings,1000,750,7)[0],"vida expirada manteve histerese");
+        healthReadings[lifeIndex].healthFraction=.49f;
+        healthReadings[lifeIndex].source=0;
+        require(!aa::evaluateMonitor(healthPlan,healthReadings,1000,750,0)[0],"fonte zero ativou regra de vida");
+        healthReadings[lifeIndex].capturedMs=0;healthReadings[lifeIndex].source=7;
+        require(!aa::evaluateMonitor(healthPlan,healthReadings,1000,750,7)[0],"captura sem instante ativou vida");
         auto mixed=health;
         mixed.huds[0].areas[3].readyReferencePath=std::filesystem::path(__FILE__).wstring();
         mixed.huds[0].areas[3].readyConfirmed=true;
@@ -234,5 +274,28 @@ int main(){try{
     auto presencePlan=aa::makeMonitorPlan(w);require(!presencePlan.readers[1].needsStacks,"presença carregaria contadores");
     linked(w,1).condition.condition=aa::Condition::StacksEqual;linked(w,1).condition.stacks=5;
     require(!aa::readinessIssues(w).empty(),"contagem com amostra ausente não bloqueou");
+    {
+        auto single=plan;
+        single.readers.resize(1);single.actions.resize(1);
+        single.actions[0].rule.action=single.actions[0].rule.condition;
+        single.actions[0].rule.triggers={{L"benchmark",L"a",L"Buffs",single.actions[0].rule.condition,{},{}}};
+        measureEvaluation("1",single);
+        auto shared=single;shared.actions.push_back(single.actions[0]);
+        shared.actions[1].rule.id=L"benchmark-2";
+        measureEvaluation("2 compartilhadas",shared);
+        auto many=single;
+        for(int i=1;i<32;++i) {
+            auto action=single.actions[0];action.rule.id=L"benchmark-"+std::to_wstring(i);
+            many.actions.push_back(std::move(action));
+        }
+        measureEvaluation("32 compartilhadas",many);
+        for(std::size_t i=1;i<many.actions.size();++i) {
+            many.readers.push_back(single.readers[0]);
+            many.actions[i].readers={i};many.actions[i].reader=i;
+            many.actions[i].rule.targetArea=L"Destino "+std::to_wstring(i);
+            many.actions[i].target.x+=static_cast<int>(i*45);
+        }
+        measureEvaluation("32 distintas",many);
+    }
     std::cout<<"Plano multi-status, compartilhamento, acoes independentes, prioridade e expiracao verificados\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

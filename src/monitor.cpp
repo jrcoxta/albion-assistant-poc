@@ -1,10 +1,10 @@
 #include "monitor.h"
 #include <algorithm>
 #include <cmath>
+#include <numeric>
 #include <stdexcept>
 namespace aa {
 namespace {
-Rule actionOf(const StatusRule& rule) { return rule.triggers.empty() ? rule.condition : rule.action; }
 std::vector<RuleTrigger> triggersOf(const StatusRule& rule) {
     if (!rule.triggers.empty()) return rule.triggers;
     return {{L"legacy-" + rule.id, rule.statusId, rule.sourceArea, rule.condition, rule.stackSamples, rule.clockReferencePath}};
@@ -32,7 +32,6 @@ MonitorPlan makeMonitorPlan(const Workspace& workspace){
         auto rule=*found;
         rule.action.enabled=rule.condition.enabled=true;
         for(auto& trigger:rule.triggers)trigger.condition.enabled=true;
-        const auto action=actionOf(rule);
         const auto target=std::find_if(hud->areas.begin(),hud->areas.end(),[&](const auto& a){return sameName(a.name,rule.targetArea);});
         if(target==hud->areas.end())throw std::runtime_error("Missing rule target.");
         MonitorAction monitored{rule,target->region,{}};
@@ -74,17 +73,37 @@ MonitorPlan makeMonitorPlan(const Workspace& workspace){
     }
     if(result.readers.empty())throw std::runtime_error("Enable at least one rule in this profile."); return result;
 }
+std::vector<std::size_t> readyComparisonSources(const MonitorPlan& plan) {
+    std::vector<std::size_t> sources(plan.actions.size());
+    std::iota(sources.begin(),sources.end(),std::size_t{0});
+    for(std::size_t i=0;i<plan.actions.size();++i)if(plan.actions[i].rule.onlyWhenReady) {
+        const auto& current=plan.actions[i];
+        for(std::size_t j=0;j<i;++j) {
+            const auto& previous=plan.actions[j];
+            const auto& a=current.target;const auto& b=previous.target;
+            if(previous.rule.onlyWhenReady&&sameName(current.rule.targetArea,previous.rule.targetArea)&&
+               a.x==b.x&&a.y==b.y&&a.width==b.width&&a.height==b.height&&a.shape==b.shape) {
+                sources[i]=sources[j];break;
+            }
+        }
+    }
+    return sources;
+}
 std::vector<bool> evaluateMonitor(const MonitorPlan& plan,const std::vector<Observation>& observations,std::int64_t nowMs,int validityMs,std::uint64_t source,std::vector<std::optional<float>>* remainingFractions,const std::vector<bool>* ready){
     std::vector<bool> active(plan.actions.size(),false);if(remainingFractions)remainingFractions->assign(plan.actions.size(),std::nullopt);if(observations.size()!=plan.readers.size())return active;
     for(std::size_t i=0;i<plan.actions.size();++i){
-        const auto& a=plan.actions[i];const auto action=actionOf(a.rule);const auto triggers=triggersOf(a.rule);std::optional<std::size_t> matching;
+        const auto& a=plan.actions[i];
+        const auto fallback=a.rule.triggers.empty()?triggersOf(a.rule):std::vector<RuleTrigger>{};
+        const auto& triggers=a.rule.triggers.empty()?fallback:a.rule.triggers;
+        std::optional<std::size_t> matching;
         // Uma condição Status anterior pode vencer o OU. Mesmo assim, uma
         // captura inválida da Vida deve apagar sua histerese para o próximo frame.
         for(std::size_t k=0;k<a.readers.size()&&k<triggers.size();++k)if(triggers[k].kind==TriggerKind::Health&&
             k<a.healthLatches.size()){
             const auto index=a.readers[k];
-            if(index>=observations.size()||observations[index].capturedMs>nowMs||
-                nowMs-observations[index].capturedMs>validityMs||observations[index].source!=source||
+             if(index>=observations.size()||source==0||validityMs<=0||observations[index].capturedMs<=0||
+                 observations[index].capturedMs>nowMs||nowMs-observations[index].capturedMs>=validityMs||
+                 observations[index].source!=source||
                 !observations[index].healthFraction||!std::isfinite(*observations[index].healthFraction)||
                 *observations[index].healthFraction<0||*observations[index].healthFraction>1)
                 a.healthLatches[k]=false;
@@ -94,7 +113,8 @@ std::vector<bool> evaluateMonitor(const MonitorPlan& plan,const std::vector<Obse
             const auto& trigger=triggers[k];const auto& observation=observations[a.readers[k]];
             bool matches=false;
             if(trigger.kind==TriggerKind::Health) {
-                const bool fresh=observation.capturedMs<=nowMs&&nowMs-observation.capturedMs<=validityMs&&observation.source==source&&
+                 const bool fresh=source!=0&&validityMs>0&&observation.capturedMs>0&&observation.capturedMs<=nowMs&&
+                     nowMs-observation.capturedMs<validityMs&&observation.source==source&&
                     observation.healthFraction&&std::isfinite(*observation.healthFraction)&&*observation.healthFraction>=0&&*observation.healthFraction<=1;
                 if(fresh) {
                     const float threshold=static_cast<float>(trigger.healthPercent)/100.f;

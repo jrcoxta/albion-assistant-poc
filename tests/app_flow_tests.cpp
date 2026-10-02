@@ -133,6 +133,15 @@ int wmain(int argc,wchar_t** argv){
         require(sameTop(app.item(NewHud),app.item(HudName))&&sameTop(app.item(HudName),app.item(DeleteHud)),"ações da HUD devem ficar na mesma linha");
         require(!IsWindowVisible(app.window)&&!app.rebuilding,"construção mostrou janela originalmente oculta ou deixou bloqueio ativo");
         {
+            const auto savedAt=std::filesystem::last_write_time(app.workspacePath);
+            Sleep(80);app.saveEditor();
+            tab(app,2);choose(app,StatusList,1,true);
+            tab(app,4);tab(app,1);
+            require(std::filesystem::last_write_time(app.workspacePath)==savedAt,
+                    "navegar ou salvar sem alteracoes regravou o workspace");
+            app.selectedStatusId=L"s1";app.makeUI();
+        }
+        {
             app.commit({});app.makeUI();
             require(app.item(NewHud)&&!app.item(HudName)&&!app.item(AreaList),"primeiro uso deve mostrar somente orientação e criação da HUD");
             require(app.item(720)==nullptr,"primeira HUD deve pedir o nome em uma única janela de criação");
@@ -148,7 +157,8 @@ int wmain(int argc,wchar_t** argv){
             tab(app,3);
             require(app.item(NewSet)&&!app.item(RuleName),"perfis vazios não devem exibir editor de regra");
             createNamed(app,NewSet,L"Meu perfil");
-            require(app.item(AvailableRule)&&!app.item(RuleName),"perfil vazio deve oferecer regras da biblioteca");
+            require(app.item(AvailableRule)&&!app.item(RuleName)&&shows(app,L"Crie uma regra na aba Regras"),
+                    "perfil sem regras deve orientar cadastro na biblioteca");
             tab(app,4);
             createNamed(app,NewRule,L"Meu destaque");
             require(!app.item(RuleName)&&app.item(RenameRule)&&!app.item(Save),"regra deve usar a lista como nome e ações explícitas");
@@ -164,7 +174,7 @@ int wmain(int argc,wchar_t** argv){
             app.running=false;
             ShowWindow(app.window,SW_SHOWNOACTIVATE);
             SetActiveWindow(app.window);
-            SetFocus(app.item(Validity));SetWindowTextW(app.item(Validity),L"731");SendMessageW(app.item(Validity),EM_SETSEL,1,2);
+            SetFocus(app.item(Validity));SetWindowTextW(app.item(Validity),L"731");app.command(Validity,EN_CHANGE);SendMessageW(app.item(Validity),EM_SETSEL,1,2);
             if(GetFocus()!=app.item(Validity))std::cerr<<"initial focus: enabled="<<IsWindowEnabled(app.item(Validity))<<" visible="<<IsWindowVisible(app.item(Validity))<<" parent="<<IsWindowVisible(app.window)<<" error="<<GetLastError()<<'\n';
             require(GetFocus()==app.item(Validity),"teste não conseguiu estabelecer foco antes da reconstrução");
             forceRebuildPaint=true;app.rebuildUIWithDraft();forceRebuildPaint=false;
@@ -174,7 +184,7 @@ int wmain(int argc,wchar_t** argv){
                 std::cerr<<"rebuild: visible="<<IsWindowVisible(app.window)<<" focus="<<(GetFocus()==app.item(Validity))<<" draft="<<(text(app.item(Validity))==L"731")<<" selection="<<begin<<","<<end<<'\n';
             require(IsWindowVisible(app.window)&&GetFocus()==app.item(Validity)&&text(app.item(Validity))==L"731"&&begin==1&&end==2,
                     "reconstrução perdeu visibilidade, foco, rascunho ou cursor");
-            SetWindowTextW(app.item(Validity),L"750");
+            SetWindowTextW(app.item(Validity),L"750");app.command(Validity,EN_CHANGE);
             try{theme::RedrawLock redraw(app.window);throw std::runtime_error("falha controlada");}catch(const std::exception&){}
             require(IsWindowVisible(app.window)&&!GetPropW(app.window,L"Albion.Theme.Redraw")&&!GetPropW(app.window,L"SysSetRedraw"),
                     "exceção deixou pintura bloqueada");
@@ -189,6 +199,59 @@ int wmain(int argc,wchar_t** argv){
                 aa::loadWorkspace(app.workspacePath,{}).shareOverlayInCapture,
                 "compartilhamento do overlay nao atualizou e salvou a preferencia");
         screenshot(app,pictures,L"ui-monitor.png");
+        {
+            SetWindowTextW(app.item(Validity),L"824");app.command(Validity,EN_CHANGE);
+            tab(app,1);
+            require(app.workspace.validityMs==824&&aa::loadWorkspace(app.workspacePath,{}).validityMs==824,
+                    "sair do Monitorar descartou validade editada");
+            tab(app,0);
+            SetWindowTextW(app.item(Validity),L"835");app.command(Validity,EN_CHANGE);
+            SendMessageW(app.item(ShareOverlay),BM_SETCHECK,BST_UNCHECKED,0);app.command(ShareOverlay,BN_CLICKED);
+            app.command(Save,BN_CLICKED);
+            require(app.workspace.validityMs==835&&!app.workspace.shareOverlayInCapture&&
+                    aa::loadWorkspace(app.workspacePath,{}).validityMs==835&&text(app.item(Validity))==L"835",
+                    "alternar compartilhamento descartou validade ainda visivel no editor");
+            SetWindowTextW(app.item(Validity),L"");app.command(Validity,EN_CHANGE);
+            SendMessageW(app.item(ShareOverlay),BM_SETCHECK,BST_CHECKED,0);
+            bool invalid=false;try{app.command(ShareOverlay,BN_CLICKED);}catch(const std::exception&){invalid=true;}
+            require(invalid&&!app.workspace.shareOverlayInCapture&&
+                    SendMessageW(app.item(ShareOverlay),BM_GETCHECK,0,0)==BST_UNCHECKED,
+                    "validade invalida alterou preferencia ou deixou checkbox discordante");
+            SetWindowTextW(app.item(Validity),L"835");app.command(Validity,EN_CHANGE);
+            SendMessageW(app.item(ShareOverlay),BM_SETCHECK,BST_CHECKED,0);app.command(ShareOverlay,BN_CLICKED);
+            SetWindowTextW(app.item(Validity),L"750");app.command(Validity,EN_CHANGE);app.command(Save,BN_CLICKED);
+            require(app.workspace.validityMs==750&&app.workspace.shareOverlayInCapture,
+                    "teste nao restaurou as preferencias originais do fluxo");
+        }
+        {
+            const auto original=app.workspace;
+            auto diagnostic=original;diagnostic.shareOverlayInCapture=false;
+            app.commit(diagnostic);app.showOverlayInCapture=true;app.makeUI();
+            require(SendMessageW(app.item(ShareOverlay),BM_GETCHECK,0,0)==BST_CHECKED&&
+                    !app.workspace.shareOverlayInCapture,
+                    "teste nao simulou opcao diagnostica efetiva diferente da preferencia salva");
+            SetWindowTextW(app.item(Validity),L"");app.command(Validity,EN_CHANGE);
+            SendMessageW(app.item(ShareOverlay),BM_SETCHECK,BST_UNCHECKED,0);
+            bool invalid=false;try{app.command(ShareOverlay,BN_CLICKED);}catch(const std::exception&){invalid=true;}
+            require(invalid&&app.showOverlayInCapture&&!app.workspace.shareOverlayInCapture&&
+                    SendMessageW(app.item(ShareOverlay),BM_GETCHECK,0,0)==BST_CHECKED,
+                    "validade invalida ocultou checkbox sem desligar overlay diagnostico");
+            app.commit(original);app.makeUI();
+        }
+        {
+            const auto saved=app.workspace.shareOverlayInCapture,effective=app.showOverlayInCapture;
+            const auto locked=CreateFileW(app.workspacePath.c_str(),GENERIC_READ,FILE_SHARE_READ,
+                                           nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+            require(locked!=INVALID_HANDLE_VALUE,"teste nao bloqueou a substituicao do workspace temporario");
+            SendMessageW(app.item(ShareOverlay),BM_SETCHECK,saved?BST_UNCHECKED:BST_CHECKED,0);
+            bool failed=false;
+            try{app.command(ShareOverlay,BN_CLICKED);}catch(const std::exception&){failed=true;}
+            CloseHandle(locked);
+            require(failed&&app.workspace.shareOverlayInCapture==saved&&app.showOverlayInCapture==effective&&
+                    aa::loadWorkspace(app.workspacePath,{}).shareOverlayInCapture==saved&&
+                    SendMessageW(app.item(ShareOverlay),BM_GETCHECK,0,0)==(effective?BST_CHECKED:BST_UNCHECKED),
+                    "falha ao gravar workspace deixou checkbox e modo efetivo divergentes");
+        }
         {
             const auto original=app.workspace;
             tab(app,1);createNamed(app,NewHud,L"HUD criada uma vez");
@@ -261,6 +324,61 @@ int wmain(int argc,wchar_t** argv){
             require(refused,"excluir regra ainda usada pelo primeiro perfil foi permitido");
             app.commit(original);app.selectedLink=-1;tab(app,0);
         }
+        {
+            const auto original=app.workspace;
+            auto changed=original;
+            auto extra=changed.rules.front();extra.id=L"r2";extra.condition.name=L"Outra regra";extra.action=extra.condition;
+            changed.rules.push_back(extra);
+            auto& first=changed.rules.front();first.action=first.condition;
+            aa::RuleTrigger health;health.id=L"vida";health.kind=aa::TriggerKind::Health;
+            health.healthArea=L"Meus status";health.healthPercent=49;
+            first.triggers={health,health};first.triggers[1].id=L"vida-2";
+            app.commit(changed);app.page=2;app.selectedRule=0;app.selectedTrigger=0;app.makeUI();
+            SetWindowTextW(app.item(HealthPercent),L"");app.command(HealthPercent,EN_CHANGE);
+            bool invalid=false;
+            try{choose(app,RuleList,1,true);}catch(const std::exception&){invalid=true;}
+            require(invalid&&app.selectedRule==0&&SendMessageW(app.item(RuleList),LB_GETCURSEL,0,0)==0,
+                    "rascunho inválido deixou lista apontando para outra regra");
+            invalid=false;
+            try{choose(app,TriggerList,1);}catch(const std::exception&){invalid=true;}
+            require(invalid&&app.selectedTrigger==0&&SendMessageW(app.item(TriggerList),CB_GETCURSEL,0,0)==0,
+                    "rascunho inválido deixou seletor apontando para outra condição");
+            SetWindowTextW(app.item(HealthPercent),L"49");app.command(HealthPercent,EN_CHANGE);
+            choose(app,RuleList,1,true);
+            require(app.selectedRule==1&&app.rule()->id==L"r2","correção não permitiu selecionar a regra pretendida");
+            app.command(DeleteRule,BN_CLICKED);
+            require(app.workspace.rules.size()==1&&app.workspace.rules.front().id==L"r1",
+                    "exclusão após corrigir o rascunho apagou outra regra");
+            app.commit(original);app.selectedRule=0;app.selectedTrigger=0;app.page=4;app.makeUI();
+        }
+        {
+            const auto original=app.workspace;
+            auto changed=original;
+            auto& first=changed.rules.front();first.action=first.condition;
+            aa::RuleTrigger primary{L"primeiro",first.statusId,first.sourceArea,first.condition,{},L""};
+            auto alternative=primary;alternative.id=L"segundo";alternative.sourceArea=L"Habilidade E";
+            first.triggers={primary,alternative};
+            app.commit(changed);app.page=0;app.selectedArea=1;app.makeUI();
+            require(app.item(CalibrateArea)&&shows(app,L"Meça o ícone"),
+                    "origem da segunda condição não oferece a calibração exigida pela leitura");
+            app.commit(original);app.selectedArea=-1;app.page=4;app.makeUI();
+        }
+        {
+            const auto original=app.workspace;
+            auto changed=original;
+            changed.statuses[0].builtinAssassin=false;
+            changed.statuses[0].referencePath=app.storeImage(L"idle-expiry",aa::loadImageResource(IDR_ASSASSIN_NONE));
+            const auto temporaryImage=std::filesystem::path(changed.statuses[0].referencePath);
+            require(temporaryImage.parent_path()==app.directory/L"status-images",
+                    "teste nao isolou a imagem temporaria no seu proprio diretorio");
+            app.commit(changed);app.makeUI();
+            require(!shows(app,L"referencia visual ausente"),"imagem presente apareceu como pendencia");
+            require(std::filesystem::remove(temporaryImage),"teste nao removeu sua propria imagem");
+            Sleep(2100);app.refreshStatus();
+            require(shows(app,L"referencia visual ausente"),
+                    "painel parado manteve prontidao antiga depois de imagem removida externamente");
+            app.commit(original);app.makeUI();
+        }
 
         app.hud()->areas[0].iconCalibrated=false;
         tab(app,2);app.start();
@@ -323,12 +441,12 @@ int wmain(int argc,wchar_t** argv){
         app.hud()->areas[0].iconCalibrated=true;
         app.capturePreview=captured;
         const auto savedValidity=app.workspace.validityMs;
-        SetWindowTextW(app.item(Validity),L"");bool invalidStart=false;
+        SetWindowTextW(app.item(Validity),L"");app.command(Validity,EN_CHANGE);bool invalidStart=false;
         try{app.start();}catch(const std::exception&){invalidStart=true;app.stop();}
         require(invalidStart&&!app.capturePreview.valid(),"campo inválido manteve captura antiga na tentativa de iniciar");
         require(app.workspace.validityMs==savedValidity&&aa::loadWorkspace(app.workspacePath,{}).validityMs==savedValidity,
             "início com campo inválido alterou ajuste salvo");
-        SetWindowTextW(app.item(Validity),std::to_wstring(savedValidity).c_str());
+        SetWindowTextW(app.item(Validity),std::to_wstring(savedValidity).c_str());app.command(Validity,EN_CHANGE);
         const auto actual=screenOf(app.target);
         app.hud()->monitorDpi=actual.dpi;app.hud()->monitorDevice=actual.device+L"-anterior";
         require(app.geometryMatches(),"app ainda bloqueou DISPLAY renumerado");
@@ -371,7 +489,7 @@ int wmain(int argc,wchar_t** argv){
             require(shows(app,L"Área circular salva")&&!app.item(CalibrateArea),"destino circular perdeu forma na interface ou exigiu medição");
             require(app.item(CalibrateHealth)&&!IsWindowEnabled(app.item(CalibrateHealth)),
                     "área circular ofereceu calibração de barra horizontal");
-            app.saveEditor();require(aa::loadWorkspace(app.workspacePath,{}).huds[1].areas[1].region.shape==aa::RegionShape::Circle,
+            app.commit(app.workspace);require(aa::loadWorkspace(app.workspacePath,{}).huds[1].areas[1].region.shape==aa::RegionShape::Circle,
                 "interface não preservou formato da área");
             screenshot(app,pictures,L"ui-hud-circulo.png");
             app.area()->region.shape=aa::RegionShape::Rectangle;
@@ -435,14 +553,14 @@ int wmain(int argc,wchar_t** argv){
         app.command(NewTrigger,BN_CLICKED);require(app.rule()->triggers.size()==2&&app.selectedTrigger==1,"adicionar condição alternativa não selecionou a nova condição");
         choose(app,TriggerKindBox,1);
         require(app.item(HealthArea)&&app.item(HealthComparisonBox)&&app.item(HealthPercent)&&!app.item(RuleStatus),"gatilho de vida misturou controles de status");
-        choose(app,HealthArea,0);choose(app,HealthComparisonBox,0);SetWindowTextW(app.item(HealthPercent),L"49");app.saveEditor();
+        choose(app,HealthArea,0);choose(app,HealthComparisonBox,0);SetWindowTextW(app.item(HealthPercent),L"49");app.command(HealthPercent,EN_CHANGE);app.saveEditor();
         const auto& healthTrigger=app.rule()->triggers[1];
         require(healthTrigger.kind==aa::TriggerKind::Health&&healthTrigger.healthArea==L"Meus status"&&healthTrigger.healthPercent==49,
                 "editor nao salvou a condicao de vida");
-        SetWindowTextW(app.item(HealthPercent),L"37");choose(app,TriggerList,0);
+        SetWindowTextW(app.item(HealthPercent),L"37");app.command(HealthPercent,EN_CHANGE);choose(app,TriggerList,0);
         require(app.rule()->triggers[1].healthPercent==37&&aa::loadWorkspace(app.workspacePath,{}).rules[0].triggers[1].healthPercent==37,
                 "selecionar outra condição descartou percentual de vida digitado");
-        choose(app,TriggerList,1);SetWindowTextW(app.item(HealthPercent),L"41");tab(app,3);tab(app,4);
+        choose(app,TriggerList,1);SetWindowTextW(app.item(HealthPercent),L"41");app.command(HealthPercent,EN_CHANGE);tab(app,3);tab(app,4);
         require(app.rule()->triggers[1].healthPercent==41&&aa::loadWorkspace(app.workspacePath,{}).rules[0].triggers[1].healthPercent==41,
                 "trocar de aba descartou percentual de vida digitado");
         screenshot(app,pictures,L"ui-regra-vida.png");
@@ -476,7 +594,7 @@ int wmain(int argc,wchar_t** argv){
         SendMessageW(app.item(OnlyWhenReady),BM_SETCHECK,BST_UNCHECKED,0);app.command(OnlyWhenReady,BN_CLICKED);
         require(!app.rule()->onlyWhenReady,"filtro de cooldown nao voltou ao padrao desligado");
         {
-            SendMessageW(app.item(FollowClock),BM_CLICK,0,0);app.rebuildUIWithDraft();
+            SendMessageW(app.item(FollowClock),BM_CLICK,0,0);app.command(FollowClock,BN_CLICKED);app.rebuildUIWithDraft();
             require(SendMessageW(app.item(FollowClock),BM_GETCHECK,0,0)==BST_CHECKED,"DPI perdeu opcao de relogio");
             app.saveEditor();require(aa::loadWorkspace(app.workspacePath,{}).rules[0].followClock,"interface nao persistiu acompanhamento");
             screenshot(app,pictures,L"ui-regra-relogio.png");
@@ -497,6 +615,15 @@ int wmain(int argc,wchar_t** argv){
             ShowWindow(app.window,SW_HIDE);
         }
         for(int effect=0;effect<5;++effect){choose(app,EffectBox,effect);app.saveEditor();require(static_cast<int>(aa::loadWorkspace(app.workspacePath,{}).rules[0].effect)==effect,"efeito da interface não persiste");}
+        {
+            const auto previous=app.workspace;
+            auto old=previous;old.rules[0].condition.profile=L"Metadado do perfil antigo";
+            old.rules[0].action.profile=old.rules[0].condition.profile;
+            app.commit(old);app.makeUI();choose(app,EffectBox,1);
+            require(aa::loadWorkspace(app.workspacePath,{}).rules[0].condition.profile==L"Metadado do perfil antigo",
+                    "editar regra compartilhada apagou metadado do workspace antigo");
+            app.commit(previous);app.makeUI();
+        }
         {
             const auto before=app.workspace;
             aa::Image colored{64,64,std::vector<std::uint8_t>(64*64*4,255)};
@@ -630,7 +757,7 @@ int wmain(int argc,wchar_t** argv){
         choose(app,HudList,0);tab(app,4);app.selectedRule=0;app.makeUI();
         const auto screen=screenOf(app.target);app.hud()->monitorDpi=screen.dpi;app.hud()->monitorDevice=screen.device;
         app.hud()->areas[1].region.shape=aa::RegionShape::Circle;
-        choose(app,ConditionBox,0);SendMessageW(app.item(FollowClock),BM_SETCHECK,BST_CHECKED,0);
+        choose(app,ConditionBox,0);SendMessageW(app.item(FollowClock),BM_SETCHECK,BST_CHECKED,0);app.command(FollowClock,BN_CLICKED);
         app.current={{{aa::Presence::Present,3,1.0f,{},{}},static_cast<std::int64_t>(GetTickCount64()),app.source}};
         app.latest=app.current;app.pending=true;app.running=true;const auto oldSource=app.source;
         app.testAction();require(!app.running&&app.source>oldSource&&!app.pending&&app.current.empty()&&app.latest.empty(),"teste visual preservou leitura anterior");

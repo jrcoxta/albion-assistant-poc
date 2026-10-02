@@ -5,11 +5,13 @@
 #include "workspace.h"
 #include "profiles.h"
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
 #include <stdexcept>
+#include <string_view>
 
 namespace {
 int checks = 0;
@@ -295,6 +297,7 @@ void shapeCompatibility() {
         rejected([&] { (void)aa::loadWorkspace(file, {}); }, "formato invalido foi aceito");
         check(bytes(file) == intact, "formato invalido sobrescreveu arquivo salvo");
     }
+    check(std::filesystem::remove(file),"fixture de formato corrompida nao foi removida pelo teste");
     aa::saveWorkspace(file, loaded);const auto intact = bytes(file);
     auto invalid = loaded;invalid.huds[0].areas[1].region.height = 61;
     rejected([&] { aa::saveWorkspace(file, invalid); }, "circulo nao quadrado foi gravado");
@@ -311,6 +314,7 @@ void clockCompatibility() {
     legacyWorkspace.statuses[0].stacks={{2,L"amostra-legada-2.png"},{3,L"amostra-legada-3.png"}};
     legacyWorkspace.statuses[0].clockReferencePath=L"relogio.png";
     linked(legacyWorkspace,0,0).followClock=true;
+    linked(legacyWorkspace,0,0).condition.profile=L"Set antigo";
     legacyFixture(file, legacyWorkspace);
     ini(file,L"workspace",L"schema",L"1");
     ini(file,L"status.0",L"debuff",L"0");
@@ -330,6 +334,7 @@ void clockCompatibility() {
     }
     ini(file, L"set.0.rule.0", L"followClock", L"1");
     ini(file, L"status.0", L"clockReferencePath", L"\"relogio.png\"");
+    const auto original=bytes(file);
     const auto loaded = aa::loadWorkspace(file, {});
     check(linked(loaded,0,0).condition.name == L"Pronto: 3", "relogio alterou regra existente");
     check(linked(loaded,0,0).followClock && linked(loaded,0,0).clockReferencePath == L"relogio.png", "opcao/referencia do relogio nao migrou para regra");
@@ -339,11 +344,14 @@ void clockCompatibility() {
           loaded.statuses[1].debuff&&loaded.statuses[1].clockReferencePath==L"relogio-sem-regra.png",
           "schema 1 perdeu amostra ou referencia sem regra correspondente");
     aa::saveWorkspace(file,loaded);
+    check(bytes(std::filesystem::path(file.wstring()+L".before-schema6.ini"))==original,
+          "schema 1 nao manteve copia integral para voltar ao EXE antigo");
     const auto roundtrip=aa::loadWorkspace(file, {});
     check(linked(roundtrip,0,0).followClock && linked(roundtrip,0,0).clockReferencePath==linked(loaded,0,0).clockReferencePath &&
           roundtrip.huds[0].areas[0].region.x==loaded.huds[0].areas[0].region.x&&
           roundtrip.statuses[0].stacks.size()==2&&roundtrip.statuses[1].stacks.size()==1&&
-          roundtrip.statuses[1].clockReferencePath==L"relogio-sem-regra.png"&&roundtrip.statuses[1].debuff,
+          roundtrip.statuses[1].clockReferencePath==L"relogio-sem-regra.png"&&roundtrip.statuses[1].debuff&&
+          linked(roundtrip,0,0).condition.profile==L"Set antigo",
           "schema 6 perdeu amostra, debuff ou relogio do schema 1");
     legacyFixture(file, loaded);
     ini(file, L"set.0.rule.0", L"followClock", nullptr);
@@ -383,6 +391,7 @@ void effectCompatibility() {
         rejected([&] { (void)aa::loadWorkspace(file, {}); }, "efeito invalido foi aceito");
         check(bytes(file) == intact, "leitura invalida sobrescreveu workspace");
     }
+    ini(file, L"set.0.rule.0", L"effect", L"2");
     legacyFixture(file, loaded);const auto intact = bytes(file);
     auto invalid = loaded;linked(invalid,0,0).effect = static_cast<aa::OverlayEffect>(5);
     rejected([&] { aa::saveWorkspace(file, invalid); }, "gravacao aceitou efeito invalido");
@@ -430,15 +439,20 @@ void invalidData() {
         {L"set.0.rule.0", L"color", L"16777216"}, {L"status.0.stack.0", L"value", L"0"}
     };
     for (const auto& c : corruptions) {
+        // Fixture temporaria criada neste teste: nao pedir ao gravador novo para
+        // sobrescrever um schema antigo adulterado intencionalmente.
+        check(std::filesystem::remove(file), "fixture corrompida nao foi removida pelo teste");
         aa::saveWorkspace(file, original); ini(file, c.section, c.key, c.value);
         const auto corrupt = bytes(file);
         rejected([&] { (void)aa::loadWorkspace(file, {}); }, "arquivo invalido gera erro de leitura");
         check(bytes(file) == corrupt, "erro de leitura nunca sobrescreve arquivo");
     }
+    check(std::filesystem::remove(file), "ultima fixture corrompida nao foi removida pelo teste");
     aa::saveWorkspace(file, original);
     { std::ofstream append(file, std::ios::binary | std::ios::app); const std::wstring duplicate = L"\r\n[workspace]\r\nschema=1\r\n";
       append.write(reinterpret_cast<const char*>(duplicate.data()), static_cast<std::streamsize>(duplicate.size() * sizeof(wchar_t))); }
     rejected([&] { (void)aa::loadWorkspace(file, {}); }, "secoes repetidas nao sao silenciosamente mescladas");
+    check(std::filesystem::remove(file),"fixture de secao duplicada nao foi removida pelo teste");
     aa::saveWorkspace(file, original);
     { std::ofstream append(file, std::ios::binary | std::ios::app); const std::wstring extra = L"\r\n[secao-desconhecida]\r\n";
       append.write(reinterpret_cast<const char*>(extra.data()), static_cast<std::streamsize>(extra.size() * sizeof(wchar_t))); }
@@ -581,7 +595,11 @@ void sharedRules() {
     aa::eraseRule(loaded,sharedId);
     check(loaded.rules.size()==1,"desvincular nao permitiu remover definicao");
     loaded.sets[0].rules.push_back({L"nao-existe",true});
-    rejected([&]{aa::saveWorkspace(file,loaded);},"vinculo quebrado foi salvo");
+    bool localized=false;
+    try{aa::saveWorkspace(file,loaded);}catch(const std::invalid_argument& error){
+        const std::string message=error.what();localized=message.find("Set")!=std::string::npos&&message.find("nao-existe")!=std::string::npos;
+    }
+    check(localized,"vinculo inexistente foi salvo ou erro nao informou perfil e ID");
     loaded.sets[0].rules.back().ruleId=loaded.sets[0].rules.front().ruleId;
     rejected([&]{aa::saveWorkspace(file,loaded);},"vinculo duplicado foi salvo");
 
@@ -601,12 +619,24 @@ void sharedRules() {
     check(restored.rules.size()==3&&restored.sets[0].rules.size()==2&&restored.sets[1].rules.size()==1&&
           linked(restored,1,0).condition.condition==aa::Condition::Present,
           "schema 6 perdeu dados da migracao ao reabrir");
+    const auto damaged=directory.path/L"alterado-externamente.ini";
+    legacyFixture(damaged,legacy,5);
+    ini(damaged,L"workspace",L"schema",L"05");
+    ini(damaged,L"secao-estranha",L"chave",L"1");
+    const auto damagedBytes=bytes(damaged);
+    rejected([&]{aa::saveWorkspace(damaged,legacy);},"workspace antigo adulterado foi substituido");
+    check(bytes(damaged)==damagedBytes&&
+          !std::filesystem::exists(std::filesystem::path(damaged.wstring()+L".before-schema6.ini")),
+          "falha ao validar original criou backup indevido ou apagou dados");
 }
 void schemaHistory() {
     TemporaryDirectory directory;
     for(int schema=3;schema<=5;++schema){
         auto w=populated(directory.path);
+        w.sets[0].rules[1].enabled=false;
         auto& rule=linked(w,0,0);rule.action=rule.condition;
+        rule.condition.profile=L"Perfil legado Mortíficos";
+        rule.action.profile=rule.condition.profile;
         aa::RuleTrigger status{L"status",w.statuses[0].id,L"Buffs",rule.condition,{},L""};
         aa::RuleTrigger alternate{L"alternativa",w.statuses[1].id,L"Buffs",rule.condition,{},L""};
         alternate.condition.condition=aa::Condition::Present;
@@ -622,31 +652,167 @@ void schemaHistory() {
         rule.triggers={status,alternate};
         const auto file=directory.path/(L"schema-"+std::to_wstring(schema)+L".ini");
         legacyFixture(file,w,schema);
+        if(schema==5)ini(file,L"workspace",L"schema",L"05");
         const auto original=bytes(file);
+        const auto primaryBackup=std::filesystem::path(file.wstring()+L".before-schema6.ini");
+        if(schema==5){std::ofstream(primaryBackup,std::ios::binary)<<"backup anterior - nao substituir";}
         auto loaded=aa::loadWorkspace(file,{});
-        check(original==bytes(file)&&linked(loaded,0,0).triggers.size()==2&&
+        check(original==bytes(file)&&!loaded.sets[0].rules[1].enabled&&
+              loaded.sets[1].rules[0].enabled&&linked(loaded,0,0).triggers.size()==2&&
               linked(loaded,0,0).triggers[1].kind==alternate.kind&&
               linked(loaded,0,0).triggers[1].healthPercent==alternate.healthPercent&&
+              linked(loaded,0,0).condition.profile==L"Perfil legado Mortíficos"&&
               linked(loaded,0,0).onlyWhenReady==(schema==5),
               "schema historico perdeu condicao, vida ou filtro antes de salvar");
         aa::saveWorkspace(file,loaded);
+        const auto backup=schema==5?std::filesystem::path(file.wstring()+L".before-schema6-1.ini"):primaryBackup;
+        check(std::filesystem::is_regular_file(backup)&&bytes(backup)==original&&
+              aa::loadWorkspace(backup,{}).rules.size()==loaded.rules.size(),
+              "backup da versao anterior nao guarda exatamente o workspace original");
+        if(schema==5)check(bytes(primaryBackup)=="backup anterior - nao substituir",
+                           "migracao sobrescreveu backup preexistente");
         const auto restored=aa::loadWorkspace(file,{});
-        check(linked(restored,0,0).triggers.size()==2&&
+        check(!restored.sets[0].rules[1].enabled&&restored.sets[1].rules[0].enabled&&
+              linked(restored,0,0).triggers.size()==2&&
               linked(restored,0,0).triggers[1].kind==alternate.kind&&
               linked(restored,0,0).triggers[1].healthPercent==alternate.healthPercent&&
+              linked(restored,0,0).condition.profile==L"Perfil legado Mortíficos"&&
               linked(restored,0,0).onlyWhenReady==(schema==5)&&
               restored.huds[0].areas[1].readyConfirmed==(schema==5),
               "schema 6 nao preservou condicao, vida ou cooldown apos migrar");
+        aa::saveWorkspace(file,restored);
+        check(bytes(backup)==original,"salvar schema 6 modificou backup anterior");
+        if(schema==5){
+            const auto padded=directory.path/L"schema-zeros-extensos.ini";
+            legacyFixture(padded,w,5);
+            const auto zeros=std::wstring(64,L'0')+L"5";
+            ini(padded,L"workspace",L"schema",zeros.c_str());
+            const auto earlier=bytes(padded);
+            const auto valid=aa::loadWorkspace(padded,{});
+            aa::saveWorkspace(padded,valid);
+            check(bytes(std::filesystem::path(padded.wstring()+L".before-schema6.ini"))==earlier,
+                  "schema antigo com zeros extensos foi substituido sem backup");
+        }
     }
 }
+void backupFailureKeepsOriginal() {
+    TemporaryDirectory directory;
+    const auto file=directory.path/L"workspace.ini";
+    legacyFixture(file,populated(directory.path),5);
+    const auto original=bytes(file);
+    const auto backup=std::filesystem::path(file.wstring()+L".before-schema6.ini");
+    check(std::filesystem::create_directory(backup),"fixture nao reservou o caminho do backup");
+    const auto migrated=aa::loadWorkspace(file,{});
+    rejected([&]{aa::saveWorkspace(file,migrated);},
+             "falha de IO ao criar backup permitiu substituir workspace antigo");
+    check(bytes(file)==original&&std::filesystem::is_directory(backup)&&
+          !std::filesystem::exists(std::filesystem::path(file.wstring()+L".before-schema6-1.ini")),
+          "falha de backup mudou dados ou removeu entrada preexistente");
+    check(std::none_of(std::filesystem::directory_iterator(directory.path),std::filesystem::directory_iterator{},
+          [](const auto& entry){return entry.path().filename().wstring().find(L".tmp-")!=std::wstring::npos;}),
+          "falha de backup deixou temporario incompleto");
 }
-int main() {
+void verifyRealWorkspaceCopy(const std::filesystem::path& source) {
+    check(std::filesystem::is_regular_file(source),"workspace de origem nao existe");
+    const auto original=bytes(source);
+    TemporaryDirectory isolated;
+    const auto copy=isolated.path/L"workspace.ini";
+    std::filesystem::copy_file(source,copy);
+    const auto before=aa::loadWorkspace(copy,{});
+    const auto started=std::chrono::steady_clock::now();
+    aa::saveWorkspace(copy,before);
+    const auto migratedAt=std::chrono::steady_clock::now();
+    const auto after=aa::loadWorkspace(copy,{});
+    const auto secondStarted=std::chrono::steady_clock::now();
+    aa::saveWorkspace(copy,after);
+    const auto resavedAt=std::chrono::steady_clock::now();
+    check(bytes(source)==original,"diagnostico alterou o workspace real");
+    check(before.nextId==after.nextId&&before.validityMs==after.validityMs&&
+          before.shareOverlayInCapture==after.shareOverlayInCapture&&
+          before.activeHudId==after.activeHudId&&before.activeSetId==after.activeSetId&&
+          before.huds.size()==after.huds.size()&&before.statuses.size()==after.statuses.size()&&
+          before.sets.size()==after.sets.size()&&before.rules.size()==after.rules.size(),
+          "migracao da copia real mudou selecao ou quantidade de entidades");
+    for(std::size_t i=0;i<before.huds.size();++i){
+        const auto& a=before.huds[i];const auto& b=after.huds[i];
+        check(a.id==b.id&&a.name==b.name&&a.clientWidth==b.clientWidth&&a.clientHeight==b.clientHeight&&
+              a.monitorDpi==b.monitorDpi&&a.monitorDevice==b.monitorDevice&&a.areas.size()==b.areas.size(),
+              "HUD real mudou apos migracao da copia");
+        for(std::size_t j=0;j<a.areas.size();++j){const auto& x=a.areas[j];const auto& y=b.areas[j];
+            check(x.name==y.name&&x.region.x==y.region.x&&x.region.y==y.region.y&&
+                  x.region.width==y.region.width&&x.region.height==y.region.height&&x.region.shape==y.region.shape&&
+                  x.iconSize==y.iconSize&&x.iconCalibrated==y.iconCalibrated&&
+                  x.readyReferencePath==y.readyReferencePath&&x.readyConfirmed==y.readyConfirmed&&
+                  x.healthCalibration.x==y.healthCalibration.x&&x.healthCalibration.y==y.healthCalibration.y&&
+                  x.healthCalibration.width==y.healthCalibration.width&&x.healthCalibration.height==y.healthCalibration.height&&
+                  x.healthCalibration.red==y.healthCalibration.red&&x.healthCalibration.green==y.healthCalibration.green&&
+                  x.healthCalibration.blue==y.healthCalibration.blue,
+                  "area ou imagem de habilidade da HUD real mudou apos migracao");
+        }
+    }
+    for(std::size_t i=0;i<before.statuses.size();++i){const auto& a=before.statuses[i];const auto& b=after.statuses[i];
+        check(a.id==b.id&&a.name==b.name&&a.debuff==b.debuff&&a.builtinAssassin==b.builtinAssassin&&
+              a.referencePath==b.referencePath&&a.clockReferencePath==b.clockReferencePath&&
+              a.stacks.size()==b.stacks.size(),"status real perdeu referencia ou amostras");
+        for(std::size_t j=0;j<a.stacks.size();++j)
+            check(a.stacks[j].value==b.stacks[j].value&&a.stacks[j].path==b.stacks[j].path,
+                  "amostra legada do status real mudou apos migracao");
+    }
+    for(std::size_t i=0;i<before.rules.size();++i){const auto& a=before.rules[i];const auto& b=after.rules[i];
+        check(a.id==b.id&&a.condition.name==b.condition.name&&a.condition.profile==b.condition.profile&&
+              a.condition.condition==b.condition.condition&&a.condition.stacks==b.condition.stacks&&
+              a.condition.color==b.condition.color&&a.action.name==b.action.name&&
+              a.statusId==b.statusId&&a.sourceArea==b.sourceArea&&a.targetArea==b.targetArea&&
+              a.stackSamples.size()==b.stackSamples.size()&&a.clockReferencePath==b.clockReferencePath&&
+              a.effect==b.effect&&a.followClock==b.followClock&&
+              a.onlyWhenReady==b.onlyWhenReady&&a.triggers.size()==b.triggers.size(),
+              "definicao da regra real mudou apos migracao");
+        for(std::size_t j=0;j<a.stackSamples.size();++j)
+            check(a.stackSamples[j].value==b.stackSamples[j].value&&a.stackSamples[j].path==b.stackSamples[j].path,
+                  "amostra da regra real mudou apos migracao");
+        for(std::size_t j=0;j<a.triggers.size();++j){const auto& x=a.triggers[j];const auto& y=b.triggers[j];
+            check(x.id==y.id&&x.kind==y.kind&&x.statusId==y.statusId&&x.sourceArea==y.sourceArea&&
+                  x.healthArea==y.healthArea&&x.healthComparison==y.healthComparison&&x.healthPercent==y.healthPercent&&
+                  x.condition.condition==y.condition.condition&&x.condition.stacks==y.condition.stacks&&
+                  x.stackSamples.size()==y.stackSamples.size()&&x.clockReferencePath==y.clockReferencePath,
+                  "condicao ou contador da regra real mudou apos migracao");
+            for(std::size_t k=0;k<x.stackSamples.size();++k)
+                check(x.stackSamples[k].value==y.stackSamples[k].value&&x.stackSamples[k].path==y.stackSamples[k].path,
+                      "contador do gatilho real mudou apos migracao");
+        }
+    }
+    for(std::size_t i=0;i<before.sets.size();++i){const auto& a=before.sets[i];const auto& b=after.sets[i];
+        check(a.id==b.id&&a.name==b.name&&a.rules.size()==b.rules.size(),
+              "perfil real mudou apos migracao da copia");
+        for(std::size_t j=0;j<a.rules.size();++j)check(a.rules[j].ruleId==b.rules[j].ruleId&&
+             a.rules[j].enabled==b.rules[j].enabled,"prioridade ou ativacao real mudou apos migracao");
+    }
+    check(aa::readinessIssues(before)==aa::readinessIssues(after),
+          "prontidao de leitura da configuracao real mudou apos migracao");
+    const auto backup=std::filesystem::path(copy.wstring()+L".before-schema6.ini");
+    check(bytes(backup)==original,"backup nao permite restaurar o workspace original");
+    std::cout<<"Copia isolada real schema antigo -> 6: "<<before.huds.size()<<" HUDs, "<<before.statuses.size()
+             <<" status, "<<before.rules.size()<<" regras, "<<before.sets.size()
+             <<" perfis; dados originais/backup/prontidao preservados; primeira gravacao "
+             <<std::chrono::duration<double,std::milli>(migratedAt-started).count()
+             <<" ms; segunda gravacao "
+             <<std::chrono::duration<double,std::milli>(resavedAt-secondStarted).count()
+             <<" ms (tempos pontuais em copia isolada)\n";
+}
+}
+int wmain(int argc,wchar_t** argv) {
     try {
+        if(argc>1){
+            if(argc!=3||std::wstring_view(argv[1])!=L"--verify-migration-copy")
+                throw std::invalid_argument("Uso: workspace_tests --verify-migration-copy arquivo.ini");
+            verifyRealWorkspaceCopy(argv[2]);return 0;
+        }
         const auto run=[](const char* name,auto test){try{test();}catch(const std::exception& error){throw std::runtime_error(std::string(name)+": "+error.what());}};
         run("temporarios",temporaryIsolation);run("roundtrip",roundtripAndIsolation);
         run("formas",shapeCompatibility);run("efeitos",effectCompatibility);
         run("relogio",clockCompatibility);run("dados invalidos",invalidData);
-        run("migracao",migration);run("prontidao",readiness);run("compartilhamento",sharedRules);run("schemas 3-5",schemaHistory);
+        run("migracao",migration);run("prontidao",readiness);run("compartilhamento",sharedRules);
+        run("schemas 3-5",schemaHistory);run("backup bloqueado",backupFailureKeepsOriginal);
     }
     catch (const std::exception& error) { std::cerr << "FALHOU: " << error.what() << '\n'; return 1; }
     std::cout << checks << " verificacoes de workspace, 0 falhas\n";

@@ -127,11 +127,12 @@ void App::load(){
         legacyStacks={{2,storeImage(L"legacy",aa::loadImageResource(IDR_ASSASSIN_2))},{3,storeImage(L"legacy",aa::loadImageResource(IDR_ASSASSIN_3))}};
     }
     workspace=aa::loadWorkspace(workspacePath,settingsPath,legacyStacks);
+    idleIssuesDirty=true;
     showOverlayInCapture=showOverlayInCapture||workspace.shareOverlayInCapture;
     if(!workspace.statuses.empty())selectedStatusId=workspace.statuses.front().id;
     if(!workspace.rules.empty())selectedRule=0;
 }
-void App::commit(aa::Workspace changed){aa::saveWorkspace(workspacePath,changed);workspace=std::move(changed);}
+void App::commit(aa::Workspace changed){aa::saveWorkspace(workspacePath,changed);workspace=std::move(changed);idleIssuesDirty=true;editorDirty=false;}
 aa::HudLayout* App::hud(){for(auto& h:workspace.huds)if(h.id==workspace.activeHudId)return &h;return nullptr;}
 aa::SetProfile* App::set(){for(auto& s:workspace.sets)if(s.id==workspace.activeSetId)return &s;return nullptr;}
 aa::StatusDefinition* App::selectedStatus(){for(auto& s:workspace.statuses)if(s.id==selectedStatusId)return &s;return nullptr;}
@@ -160,6 +161,7 @@ bool App::connect(){
 }
 void App::stop(){
     capture.stop();running=false;previewUntil=0;++source;
+    idleIssuesDirty=true;
     if(badge)ShowWindow(badge,SW_HIDE);
     for(auto& o:overlays)o->update(target,{},false);overlays.clear();
     if(testOverlay)testOverlay->update(target,{},false);
@@ -211,7 +213,8 @@ void App::start(){
     current.resize(plan.readers.size());lit.assign(plan.actions.size(),false);running=true;const auto runSource=++source;
     error.clear();page=4;makeUI();SetForegroundWindow(target);
     try{
-        capture.start(target,rect(plan.captureArea),[this,runSource](aa::CaptureFrame frame){
+        const auto readySources=aa::readyComparisonSources(plan);
+        capture.start(target,rect(plan.captureArea),[this,runSource,readySources](aa::CaptureFrame frame){
             std::vector<aa::Observation> batch(plan.readers.size());std::wstring failure=widen(frame.error);
             std::vector<bool> readyBatch(plan.actions.size(),false);
             for(std::size_t i=0;i<plan.readers.size();++i){
@@ -224,6 +227,7 @@ void App::start(){
                 }catch(const std::exception& e){failure=widen(e.what());}
             }
             if(frame.available)for(std::size_t i=0;i<plan.actions.size();++i)if(plan.actions[i].rule.onlyWhenReady){
+                if(readySources[i]!=i){readyBatch[i]=readyBatch[readySources[i]];continue;}
                 try{auto roi=plan.actions[i].target;roi.x-=plan.captureArea.x;roi.y-=plan.captureArea.y;
                     readyBatch[i]=aa::skillReady(aa::cropImage(frame.image,roi),readyReferences[i],roi.shape);
                 }catch(const std::exception& e){failure=widen(e.what());}
@@ -261,6 +265,7 @@ std::vector<std::optional<float>> App::evaluateReadings(std::int64_t now,bool ta
     return remaining;
 }
 void App::updateHighlight(){
+    if(!running&&!previewUntil)return;
     const auto now=static_cast<std::int64_t>(GetTickCount64());const bool geometry=geometryMatches();
     if(previewUntil){
         const bool active=static_cast<std::uint64_t>(now)<previewUntil&&geometry;

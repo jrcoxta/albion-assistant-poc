@@ -45,10 +45,13 @@ struct App {
     HFONT font{}, titleFont{};
     std::filesystem::path directory, settingsPath, workspacePath;
     aa::Workspace workspace;
+    std::vector<std::wstring> idleIssues;
+    bool idleIssuesDirty=true;
+    std::uint64_t idleIssuesCheckedAt=0;
     int page=0, selectedArea=-1, selectedRule=-1, selectedTrigger=0, selectedLink=-1;
     std::wstring selectedStatusId;
     double dpi=1;
-    bool rebuilding=false, selecting=false, running=false;
+    bool rebuilding=false, selecting=false, running=false, editorDirty=false;
     bool diagnostics=false, showOverlayInCapture=false;
     std::wstring error=L"Conecte ao jogo. Escolha uma HUD e um set para iniciar.", hotkeyWarning;
     std::vector<HWND> controls;
