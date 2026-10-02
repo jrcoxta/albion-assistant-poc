@@ -127,15 +127,17 @@ void App::load(){
         legacyStacks={{2,storeImage(L"legacy",aa::loadImageResource(IDR_ASSASSIN_2))},{3,storeImage(L"legacy",aa::loadImageResource(IDR_ASSASSIN_3))}};
     }
     workspace=aa::loadWorkspace(workspacePath,settingsPath,legacyStacks);
+    idleIssuesDirty=true;
     showOverlayInCapture=showOverlayInCapture||workspace.shareOverlayInCapture;
     if(!workspace.statuses.empty())selectedStatusId=workspace.statuses.front().id;
+    if(!workspace.rules.empty())selectedRule=0;
 }
-void App::commit(aa::Workspace changed){aa::saveWorkspace(workspacePath,changed);workspace=std::move(changed);}
+void App::commit(aa::Workspace changed){aa::saveWorkspace(workspacePath,changed);workspace=std::move(changed);idleIssuesDirty=true;editorDirty=false;}
 aa::HudLayout* App::hud(){for(auto& h:workspace.huds)if(h.id==workspace.activeHudId)return &h;return nullptr;}
 aa::SetProfile* App::set(){for(auto& s:workspace.sets)if(s.id==workspace.activeSetId)return &s;return nullptr;}
 aa::StatusDefinition* App::selectedStatus(){for(auto& s:workspace.statuses)if(s.id==selectedStatusId)return &s;return nullptr;}
 aa::HudArea* App::area(){auto* h=hud();return h&&selectedArea>=0&&selectedArea<static_cast<int>(h->areas.size())?&h->areas[selectedArea]:nullptr;}
-aa::StatusRule* App::rule(){auto* s=set();return s&&selectedRule>=0&&selectedRule<static_cast<int>(s->rules.size())?&s->rules[selectedRule]:nullptr;}
+aa::StatusRule* App::rule(){return selectedRule>=0&&selectedRule<static_cast<int>(workspace.rules.size())?&workspace.rules[static_cast<std::size_t>(selectedRule)]:nullptr;}
 bool App::geometryMatches()const{
     if(!target||!IsWindow(target)||IsIconic(target))return false;
     try{
@@ -159,6 +161,7 @@ bool App::connect(){
 }
 void App::stop(){
     capture.stop();running=false;previewUntil=0;++source;
+    idleIssuesDirty=true;
     if(badge)ShowWindow(badge,SW_HIDE);
     for(auto& o:overlays)o->update(target,{},false);overlays.clear();
     if(testOverlay)testOverlay->update(target,{},false);
@@ -181,7 +184,7 @@ void App::start(){
     }catch(const std::exception&){issues.insert(issues.begin(),L"Janela do jogo indisponível ou fora dos monitores. Conecte novamente.");}
     if(!issues.empty()){
         error=L"Antes de iniciar:\r\n";for(std::size_t i=0;i<std::min<std::size_t>(issues.size(),4);++i)error+=L"• "+issues[i]+L"\r\n";
-        page=3;makeUI();return;
+        page=4;makeUI();return;
     }
     plan=aa::makeMonitorPlan(workspace);
     if(static_cast<std::int64_t>(plan.captureArea.width)*plan.captureArea.height>64000000)throw std::runtime_error("As regiões abrangem uma área grande demais. Use o jogo em um único monitor.");
@@ -208,9 +211,10 @@ void App::start(){
         readyReferences.push_back(std::move(reference));
     }
     current.resize(plan.readers.size());lit.assign(plan.actions.size(),false);running=true;const auto runSource=++source;
-    error.clear();page=3;makeUI();SetForegroundWindow(target);
+    error.clear();page=4;makeUI();SetForegroundWindow(target);
     try{
-        capture.start(target,rect(plan.captureArea),[this,runSource](aa::CaptureFrame frame){
+        const auto readySources=aa::readyComparisonSources(plan);
+        capture.start(target,rect(plan.captureArea),[this,runSource,readySources](aa::CaptureFrame frame){
             std::vector<aa::Observation> batch(plan.readers.size());std::wstring failure=widen(frame.error);
             std::vector<bool> readyBatch(plan.actions.size(),false);
             for(std::size_t i=0;i<plan.readers.size();++i){
@@ -223,6 +227,7 @@ void App::start(){
                 }catch(const std::exception& e){failure=widen(e.what());}
             }
             if(frame.available)for(std::size_t i=0;i<plan.actions.size();++i)if(plan.actions[i].rule.onlyWhenReady){
+                if(readySources[i]!=i){readyBatch[i]=readyBatch[readySources[i]];continue;}
                 try{auto roi=plan.actions[i].target;roi.x-=plan.captureArea.x;roi.y-=plan.captureArea.y;
                     readyBatch[i]=aa::skillReady(aa::cropImage(frame.image,roi),readyReferences[i],roi.shape);
                 }catch(const std::exception& e){failure=widen(e.what());}
@@ -238,7 +243,7 @@ void App::consume(){
     if(!current.empty()&&std::all_of(current.begin(),current.end(),[this](const auto& observation){
         return observation.source==source&&observation.capturedMs>0;
     }))lastReadings=current;
-    updateHighlight();refreshStatus();if(page==3){RECT area{px(24),px(486),px(832),px(602)};InvalidateRect(window,&area,FALSE);}
+    updateHighlight();refreshStatus();if(page==4){RECT area{px(24),px(486),px(832),px(602)};InvalidateRect(window,&area,FALSE);}
 }
 std::vector<std::optional<float>> App::evaluateReadings(std::int64_t now,bool targetReady){
     std::vector<std::optional<float>> remaining(plan.actions.size());
@@ -260,6 +265,7 @@ std::vector<std::optional<float>> App::evaluateReadings(std::int64_t now,bool ta
     return remaining;
 }
 void App::updateHighlight(){
+    if(!running&&!previewUntil)return;
     const auto now=static_cast<std::int64_t>(GetTickCount64());const bool geometry=geometryMatches();
     if(previewUntil){
         const bool active=static_cast<std::uint64_t>(now)<previewUntil&&geometry;
@@ -299,9 +305,7 @@ bool App::applyActionColor(const aa::Image& image){
     const auto color=aa::skillAccentColor(image);
     if(!color){error=L"Não encontrei uma cor nítida. A cor atual foi mantida.";return false;}
     auto changed=workspace;
-    for(auto& profile:changed.sets)if(profile.id==workspace.activeSetId) {
-        auto& selected=profile.rules.at(static_cast<std::size_t>(selectedRule));selected.action.color=*color;selected.condition.color=*color;
-    }
+    auto& selected=changed.rules.at(static_cast<std::size_t>(selectedRule));selected.action.color=*color;selected.condition.color=*color;
     commit(std::move(changed));error=L"Cor capturada e salva. Capture novamente para atualizar.";return true;
 }
 void App::applyClockReference(const aa::Image& image){

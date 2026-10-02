@@ -29,7 +29,7 @@ LRESULT CALLBACK testProc(HWND window,UINT message,WPARAM wp,LPARAM lp){
     if(message==WM_PAINT&&app){if(app->rebuilding)++intermediatePaints;app->paint();return 0;}
     return DefWindowProcW(window,message,wp,lp);
 }
-void tab(App& app,int page){const int physical[]={3,0,1,2};app.command(Tab0+physical[page],BN_CLICKED);require(app.page==physical[page],"navegação não mudou de página");}
+void tab(App& app,int page){const int physical[]={4,0,1,3,2};app.command(Tab0+physical[page],BN_CLICKED);require(app.page==physical[page],"navegação não mudou de página");}
 void choose(App& app,int id,int index,bool list=false){SendMessageW(app.item(id),list?LB_SETCURSEL:CB_SETCURSEL,index,0);app.command(id,list?LBN_SELCHANGE:CBN_SELCHANGE);}
 bool shows(App& app,const wchar_t* phrase){return std::any_of(app.controls.begin(),app.controls.end(),[&](HWND control){return text(control).find(phrase)!=std::wstring::npos;});}
 bool sameTop(HWND first,HWND second){RECT a{},b{};return first&&second&&GetWindowRect(first,&a)&&GetWindowRect(second,&b)&&a.top==b.top;}
@@ -104,7 +104,7 @@ int wmain(int argc,wchar_t** argv){
         aa::StatusRule rule;rule.id=L"r1";rule.statusId=L"s1";rule.sourceArea=L"Meus status";rule.targetArea=L"Habilidade E";
         rule.condition.name=L"Preparar golpe";rule.condition.condition=aa::Condition::StacksEqual;rule.condition.stacks=3;
         rule.stackSamples={{3,app.storeImage(L"r1",aa::loadImageResource(IDR_ASSASSIN_3))}};
-        w.sets={{L"set1",L"Adagas",{rule}},{L"set2",L"Cajado",{}}};w.activeSetId=L"set1";
+        w.rules={rule};w.sets={{L"set1",L"Adagas",{{L"r1",true}}},{L"set2",L"Cajado",{}}};w.activeSetId=L"set1";
         app.commit(w);app.selectedStatusId=L"s1";
         WNDCLASSW cls{};cls.hInstance=app.instance;cls.lpfnWndProc=testProc;cls.lpszClassName=L"AlbionAppFlowTests";cls.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_BTNFACE+1);RegisterClassW(&cls);
         app.window=CreateWindowExW(0,cls.lpszClassName,L"Validação do painel",WS_OVERLAPPED|WS_CAPTION,20,20,880,740,nullptr,nullptr,app.instance,&app);
@@ -133,6 +133,15 @@ int wmain(int argc,wchar_t** argv){
         require(sameTop(app.item(NewHud),app.item(HudName))&&sameTop(app.item(HudName),app.item(DeleteHud)),"ações da HUD devem ficar na mesma linha");
         require(!IsWindowVisible(app.window)&&!app.rebuilding,"construção mostrou janela originalmente oculta ou deixou bloqueio ativo");
         {
+            const auto savedAt=std::filesystem::last_write_time(app.workspacePath);
+            Sleep(80);app.saveEditor();
+            tab(app,2);choose(app,StatusList,1,true);
+            tab(app,4);tab(app,1);
+            require(std::filesystem::last_write_time(app.workspacePath)==savedAt,
+                    "navegar ou salvar sem alteracoes regravou o workspace");
+            app.selectedStatusId=L"s1";app.makeUI();
+        }
+        {
             app.commit({});app.makeUI();
             require(app.item(NewHud)&&!app.item(HudName)&&!app.item(AreaList),"primeiro uso deve mostrar somente orientação e criação da HUD");
             require(app.item(720)==nullptr,"primeira HUD deve pedir o nome em uma única janela de criação");
@@ -148,7 +157,9 @@ int wmain(int argc,wchar_t** argv){
             tab(app,3);
             require(app.item(NewSet)&&!app.item(RuleName),"perfis vazios não devem exibir editor de regra");
             createNamed(app,NewSet,L"Meu perfil");
-            require(app.item(NewRule)&&!app.item(RuleName),"perfil vazio deve orientar criação da primeira regra");
+            require(app.item(AvailableRule)&&!app.item(RuleName)&&shows(app,L"Crie uma regra na aba Regras"),
+                    "perfil sem regras deve orientar cadastro na biblioteca");
+            tab(app,4);
             createNamed(app,NewRule,L"Meu destaque");
             require(!app.item(RuleName)&&app.item(RenameRule)&&!app.item(Save),"regra deve usar a lista como nome e ações explícitas");
             app.commit(w);app.selectedArea=-1;app.selectedRule=-1;app.selectedStatusId=L"s1";app.page=0;app.makeUI();
@@ -163,7 +174,7 @@ int wmain(int argc,wchar_t** argv){
             app.running=false;
             ShowWindow(app.window,SW_SHOWNOACTIVATE);
             SetActiveWindow(app.window);
-            SetFocus(app.item(Validity));SetWindowTextW(app.item(Validity),L"731");SendMessageW(app.item(Validity),EM_SETSEL,1,2);
+            SetFocus(app.item(Validity));SetWindowTextW(app.item(Validity),L"731");app.command(Validity,EN_CHANGE);SendMessageW(app.item(Validity),EM_SETSEL,1,2);
             if(GetFocus()!=app.item(Validity))std::cerr<<"initial focus: enabled="<<IsWindowEnabled(app.item(Validity))<<" visible="<<IsWindowVisible(app.item(Validity))<<" parent="<<IsWindowVisible(app.window)<<" error="<<GetLastError()<<'\n';
             require(GetFocus()==app.item(Validity),"teste não conseguiu estabelecer foco antes da reconstrução");
             forceRebuildPaint=true;app.rebuildUIWithDraft();forceRebuildPaint=false;
@@ -173,7 +184,7 @@ int wmain(int argc,wchar_t** argv){
                 std::cerr<<"rebuild: visible="<<IsWindowVisible(app.window)<<" focus="<<(GetFocus()==app.item(Validity))<<" draft="<<(text(app.item(Validity))==L"731")<<" selection="<<begin<<","<<end<<'\n';
             require(IsWindowVisible(app.window)&&GetFocus()==app.item(Validity)&&text(app.item(Validity))==L"731"&&begin==1&&end==2,
                     "reconstrução perdeu visibilidade, foco, rascunho ou cursor");
-            SetWindowTextW(app.item(Validity),L"750");
+            SetWindowTextW(app.item(Validity),L"750");app.command(Validity,EN_CHANGE);
             try{theme::RedrawLock redraw(app.window);throw std::runtime_error("falha controlada");}catch(const std::exception&){}
             require(IsWindowVisible(app.window)&&!GetPropW(app.window,L"Albion.Theme.Redraw")&&!GetPropW(app.window,L"SysSetRedraw"),
                     "exceção deixou pintura bloqueada");
@@ -188,6 +199,59 @@ int wmain(int argc,wchar_t** argv){
                 aa::loadWorkspace(app.workspacePath,{}).shareOverlayInCapture,
                 "compartilhamento do overlay nao atualizou e salvou a preferencia");
         screenshot(app,pictures,L"ui-monitor.png");
+        {
+            SetWindowTextW(app.item(Validity),L"824");app.command(Validity,EN_CHANGE);
+            tab(app,1);
+            require(app.workspace.validityMs==824&&aa::loadWorkspace(app.workspacePath,{}).validityMs==824,
+                    "sair do Monitorar descartou validade editada");
+            tab(app,0);
+            SetWindowTextW(app.item(Validity),L"835");app.command(Validity,EN_CHANGE);
+            SendMessageW(app.item(ShareOverlay),BM_SETCHECK,BST_UNCHECKED,0);app.command(ShareOverlay,BN_CLICKED);
+            app.command(Save,BN_CLICKED);
+            require(app.workspace.validityMs==835&&!app.workspace.shareOverlayInCapture&&
+                    aa::loadWorkspace(app.workspacePath,{}).validityMs==835&&text(app.item(Validity))==L"835",
+                    "alternar compartilhamento descartou validade ainda visivel no editor");
+            SetWindowTextW(app.item(Validity),L"");app.command(Validity,EN_CHANGE);
+            SendMessageW(app.item(ShareOverlay),BM_SETCHECK,BST_CHECKED,0);
+            bool invalid=false;try{app.command(ShareOverlay,BN_CLICKED);}catch(const std::exception&){invalid=true;}
+            require(invalid&&!app.workspace.shareOverlayInCapture&&
+                    SendMessageW(app.item(ShareOverlay),BM_GETCHECK,0,0)==BST_UNCHECKED,
+                    "validade invalida alterou preferencia ou deixou checkbox discordante");
+            SetWindowTextW(app.item(Validity),L"835");app.command(Validity,EN_CHANGE);
+            SendMessageW(app.item(ShareOverlay),BM_SETCHECK,BST_CHECKED,0);app.command(ShareOverlay,BN_CLICKED);
+            SetWindowTextW(app.item(Validity),L"750");app.command(Validity,EN_CHANGE);app.command(Save,BN_CLICKED);
+            require(app.workspace.validityMs==750&&app.workspace.shareOverlayInCapture,
+                    "teste nao restaurou as preferencias originais do fluxo");
+        }
+        {
+            const auto original=app.workspace;
+            auto diagnostic=original;diagnostic.shareOverlayInCapture=false;
+            app.commit(diagnostic);app.showOverlayInCapture=true;app.makeUI();
+            require(SendMessageW(app.item(ShareOverlay),BM_GETCHECK,0,0)==BST_CHECKED&&
+                    !app.workspace.shareOverlayInCapture,
+                    "teste nao simulou opcao diagnostica efetiva diferente da preferencia salva");
+            SetWindowTextW(app.item(Validity),L"");app.command(Validity,EN_CHANGE);
+            SendMessageW(app.item(ShareOverlay),BM_SETCHECK,BST_UNCHECKED,0);
+            bool invalid=false;try{app.command(ShareOverlay,BN_CLICKED);}catch(const std::exception&){invalid=true;}
+            require(invalid&&app.showOverlayInCapture&&!app.workspace.shareOverlayInCapture&&
+                    SendMessageW(app.item(ShareOverlay),BM_GETCHECK,0,0)==BST_CHECKED,
+                    "validade invalida ocultou checkbox sem desligar overlay diagnostico");
+            app.commit(original);app.makeUI();
+        }
+        {
+            const auto saved=app.workspace.shareOverlayInCapture,effective=app.showOverlayInCapture;
+            const auto locked=CreateFileW(app.workspacePath.c_str(),GENERIC_READ,FILE_SHARE_READ,
+                                           nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+            require(locked!=INVALID_HANDLE_VALUE,"teste nao bloqueou a substituicao do workspace temporario");
+            SendMessageW(app.item(ShareOverlay),BM_SETCHECK,saved?BST_UNCHECKED:BST_CHECKED,0);
+            bool failed=false;
+            try{app.command(ShareOverlay,BN_CLICKED);}catch(const std::exception&){failed=true;}
+            CloseHandle(locked);
+            require(failed&&app.workspace.shareOverlayInCapture==saved&&app.showOverlayInCapture==effective&&
+                    aa::loadWorkspace(app.workspacePath,{}).shareOverlayInCapture==saved&&
+                    SendMessageW(app.item(ShareOverlay),BM_GETCHECK,0,0)==(effective?BST_CHECKED:BST_UNCHECKED),
+                    "falha ao gravar workspace deixou checkbox e modo efetivo divergentes");
+        }
         {
             const auto original=app.workspace;
             tab(app,1);createNamed(app,NewHud,L"HUD criada uma vez");
@@ -211,22 +275,114 @@ int wmain(int argc,wchar_t** argv){
             tab(app,3);createNamed(app,NewSet,L"Set criado uma vez");
             createNamed(app,NewSet,L"Cancelado",true);createNamed(app,NewSet,L"set criado uma vez",false,true);
             require(app.workspace.sets.size()==3&&app.set()->name==L"Set criado uma vez","cancelar/rejeitar set alterou a seleção");
-            createNamed(app,NewRule,L"Regra criada uma vez");
-            require(app.workspace.sets.size()==3&&app.set()->rules.size()==1&&app.rule()->condition.name==L"Regra criada uma vez",
+            tab(app,4);createNamed(app,NewRule,L"Regra criada uma vez");
+            require(app.workspace.sets.size()==3&&app.workspace.rules.size()==2&&app.rule()->condition.name==L"Regra criada uma vez",
                     "criação de set/regra exige outro Novo");
             createNamed(app,NewRule,L"REGRA CRIADA UMA VEZ",false,true);
             createNamed(app,NewRule,L"Cancelada",true);
             require(app.rule()->condition.name==L"Regra criada uma vez"&&app.item(RenameRule)&&!app.item(RuleName),
                     "regra deve ter nome somente informativo e acao explicita para renomear");
-            require(app.set()->rules.size()==1,"criação aceitou regra duplicada");
-            app.commit(original);app.selectedStatusId=L"s1";app.selectedArea=-1;app.selectedRule=-1;app.page=3;app.makeUI();
+            require(app.workspace.rules.size()==2,"criação aceitou regra duplicada");
+            app.commit(original);app.selectedStatusId=L"s1";app.selectedArea=-1;app.selectedRule=0;app.page=4;app.makeUI();
         }
-        choose(app,HudList,1);require(app.workspace.activeHudId==L"h2"&&app.workspace.activeSetId==L"set1"&&app.set()->rules[0].condition.stacks==3,"troca de HUD alterou o set");
+        choose(app,HudList,1);require(app.workspace.activeHudId==L"h2"&&app.workspace.activeSetId==L"set1"&&app.rule()->condition.stacks==3,"troca de HUD alterou o set");
         choose(app,SetList,1);require(app.workspace.activeHudId==L"h2"&&app.workspace.activeSetId==L"set2","troca de set alterou a HUD");choose(app,SetList,0);
+        {
+            const auto original=app.workspace;
+            tab(app,3);choose(app,SetList,1);
+            require(app.set()->rules.empty()&&app.item(AvailableRule),"perfil vazio não oferece regra reutilizável");
+            app.command(AddRuleToSet,BN_CLICKED);
+            require(app.set()->rules.size()==1&&app.set()->rules.front().ruleId==L"r1"&&
+                    app.workspace.sets.front().rules.front().ruleId==L"r1",
+                    "adicionar regra existente criou cópia ou vínculo errado");
+            tab(app,4);choose(app,EffectBox,4);
+            require(app.workspace.rules.front().effect==aa::OverlayEffect::Flames&&
+                    aa::loadWorkspace(app.workspacePath,{}).sets[1].rules[0].ruleId==L"r1"&&
+                    aa::makeMonitorPlan(app.workspace).actions[0].rule.effect==aa::OverlayEffect::Flames,
+                    "editar regra da biblioteca não atualizou o segundo perfil");
+            createNamed(app,NewRule,L"Regra de prioridade");
+            const auto extraId=app.rule()->id;
+            tab(app,3);app.command(AddRuleToSet,BN_CLICKED);
+            require(app.set()->rules.size()==2&&app.set()->rules[1].ruleId==extraId,
+                    "adicionar segunda regra ao perfil perdeu ordem de inclusão");
+            app.command(MoveRuleUp,BN_CLICKED);
+            require(app.selectedLink==0&&app.set()->rules[0].ruleId==extraId&&
+                    app.workspace.sets[0].rules[0].ruleId==L"r1"&&
+                    aa::loadWorkspace(app.workspacePath,{}).sets[1].rules[0].ruleId==extraId,
+                    "mover prioridade alterou outro perfil ou não persistiu");
+            app.command(RemoveRuleFromSet,BN_CLICKED);
+            require(app.set()->rules.size()==1&&app.set()->rules[0].ruleId==L"r1",
+                    "remover segunda regra afetou o vínculo compartilhado");
+            choose(app,RuleList,0,true);SendMessageW(app.item(Enabled),BM_SETCHECK,BST_UNCHECKED,0);
+            app.command(Enabled,BN_CLICKED);
+            require(!app.set()->rules[0].enabled&&app.workspace.sets[0].rules[0].enabled,
+                    "desativar em um perfil afetou o outro");
+            app.command(RemoveRuleFromSet,BN_CLICKED);
+            require(app.set()->rules.empty()&&app.workspace.rules.size()==2,
+                    "remover vínculo apagou a regra da biblioteca");
+            bool refused=false;try{aa::eraseRule(app.workspace,L"r1");}catch(const std::invalid_argument&){refused=true;}
+            require(refused,"excluir regra ainda usada pelo primeiro perfil foi permitido");
+            app.commit(original);app.selectedLink=-1;tab(app,0);
+        }
+        {
+            const auto original=app.workspace;
+            auto changed=original;
+            auto extra=changed.rules.front();extra.id=L"r2";extra.condition.name=L"Outra regra";extra.action=extra.condition;
+            changed.rules.push_back(extra);
+            auto& first=changed.rules.front();first.action=first.condition;
+            aa::RuleTrigger health;health.id=L"vida";health.kind=aa::TriggerKind::Health;
+            health.healthArea=L"Meus status";health.healthPercent=49;
+            first.triggers={health,health};first.triggers[1].id=L"vida-2";
+            app.commit(changed);app.page=2;app.selectedRule=0;app.selectedTrigger=0;app.makeUI();
+            SetWindowTextW(app.item(HealthPercent),L"");app.command(HealthPercent,EN_CHANGE);
+            bool invalid=false;
+            try{choose(app,RuleList,1,true);}catch(const std::exception&){invalid=true;}
+            require(invalid&&app.selectedRule==0&&SendMessageW(app.item(RuleList),LB_GETCURSEL,0,0)==0,
+                    "rascunho inválido deixou lista apontando para outra regra");
+            invalid=false;
+            try{choose(app,TriggerList,1);}catch(const std::exception&){invalid=true;}
+            require(invalid&&app.selectedTrigger==0&&SendMessageW(app.item(TriggerList),CB_GETCURSEL,0,0)==0,
+                    "rascunho inválido deixou seletor apontando para outra condição");
+            SetWindowTextW(app.item(HealthPercent),L"49");app.command(HealthPercent,EN_CHANGE);
+            choose(app,RuleList,1,true);
+            require(app.selectedRule==1&&app.rule()->id==L"r2","correção não permitiu selecionar a regra pretendida");
+            app.command(DeleteRule,BN_CLICKED);
+            require(app.workspace.rules.size()==1&&app.workspace.rules.front().id==L"r1",
+                    "exclusão após corrigir o rascunho apagou outra regra");
+            app.commit(original);app.selectedRule=0;app.selectedTrigger=0;app.page=4;app.makeUI();
+        }
+        {
+            const auto original=app.workspace;
+            auto changed=original;
+            auto& first=changed.rules.front();first.action=first.condition;
+            aa::RuleTrigger primary{L"primeiro",first.statusId,first.sourceArea,first.condition,{},L""};
+            auto alternative=primary;alternative.id=L"segundo";alternative.sourceArea=L"Habilidade E";
+            first.triggers={primary,alternative};
+            app.commit(changed);app.page=0;app.selectedArea=1;app.makeUI();
+            require(app.item(CalibrateArea)&&shows(app,L"Meça o ícone"),
+                    "origem da segunda condição não oferece a calibração exigida pela leitura");
+            app.commit(original);app.selectedArea=-1;app.page=4;app.makeUI();
+        }
+        {
+            const auto original=app.workspace;
+            auto changed=original;
+            changed.statuses[0].builtinAssassin=false;
+            changed.statuses[0].referencePath=app.storeImage(L"idle-expiry",aa::loadImageResource(IDR_ASSASSIN_NONE));
+            const auto temporaryImage=std::filesystem::path(changed.statuses[0].referencePath);
+            require(temporaryImage.parent_path()==app.directory/L"status-images",
+                    "teste nao isolou a imagem temporaria no seu proprio diretorio");
+            app.commit(changed);app.makeUI();
+            require(!shows(app,L"referencia visual ausente"),"imagem presente apareceu como pendencia");
+            require(std::filesystem::remove(temporaryImage),"teste nao removeu sua propria imagem");
+            Sleep(2100);app.refreshStatus();
+            require(shows(app,L"referencia visual ausente"),
+                    "painel parado manteve prontidao antiga depois de imagem removida externamente");
+            app.commit(original);app.makeUI();
+        }
 
         app.hud()->areas[0].iconCalibrated=false;
         tab(app,2);app.start();
-        require(app.page==3&&!app.running&&app.recognizers.empty()&&app.overlays.empty(),"origem sem calibração iniciou leitura");
+        require(app.page==4&&!app.running&&app.recognizers.empty()&&app.overlays.empty(),"origem sem calibração iniciou leitura");
         require(!app.capturePreview.valid(),"referência do status apareceu como captura após início bloqueado");
         require(app.referencePreview.valid(),"início bloqueado perdeu a referência da biblioteca");
         require(app.error.find(L"Meus status")!=std::wstring::npos&&app.error.find(L"Monitor 34")!=std::wstring::npos&&
@@ -285,12 +441,12 @@ int wmain(int argc,wchar_t** argv){
         app.hud()->areas[0].iconCalibrated=true;
         app.capturePreview=captured;
         const auto savedValidity=app.workspace.validityMs;
-        SetWindowTextW(app.item(Validity),L"");bool invalidStart=false;
+        SetWindowTextW(app.item(Validity),L"");app.command(Validity,EN_CHANGE);bool invalidStart=false;
         try{app.start();}catch(const std::exception&){invalidStart=true;app.stop();}
         require(invalidStart&&!app.capturePreview.valid(),"campo inválido manteve captura antiga na tentativa de iniciar");
         require(app.workspace.validityMs==savedValidity&&aa::loadWorkspace(app.workspacePath,{}).validityMs==savedValidity,
             "início com campo inválido alterou ajuste salvo");
-        SetWindowTextW(app.item(Validity),std::to_wstring(savedValidity).c_str());
+        SetWindowTextW(app.item(Validity),std::to_wstring(savedValidity).c_str());app.command(Validity,EN_CHANGE);
         const auto actual=screenOf(app.target);
         app.hud()->monitorDpi=actual.dpi;app.hud()->monitorDevice=actual.device+L"-anterior";
         require(app.geometryMatches(),"app ainda bloqueou DISPLAY renumerado");
@@ -312,6 +468,14 @@ int wmain(int argc,wchar_t** argv){
 
         tab(app,1);require(app.item(HudName)&&text(app.item(HudName))==L"Renomear"&&app.item(NewHud)&&app.item(DeleteHud)&&!shows(app,L"Opções da HUD")&&!app.item(AreaName)&&!app.item(RuleName)&&!app.item(CaptureStatus),"HUD deve expor renomear e excluir diretamente");
         require(app.item(RenameArea)&&!app.item(AreaName),"área deve usar a lista como nome e renomear por ação explícita");
+        {
+            const auto original=app.workspace;
+            choose(app,AreaList,0,true);
+            app.running=true;createNamed(app,RenameArea,L"Origem renomeada");
+            require(!app.running&&!aa::readinessIssues(app.workspace).empty(),
+                    "renomear origem durante a leitura conservou plano ativo ou ignorou dependencia perdida");
+            app.commit(original);app.makeUI();
+        }
         tab(app,2);require(app.item(RenameStatus)&&!app.item(StatusName),"status deve usar a lista como nome e renomear por ação explícita");
         tab(app,3);require(app.item(RenameSet)&&!app.item(SetName)&&app.item(NewSet)&&app.item(DeleteSet),"perfil deve usar o seletor como nome e ações explícitas");
         tab(app,1);
@@ -325,7 +489,7 @@ int wmain(int argc,wchar_t** argv){
             require(shows(app,L"Área circular salva")&&!app.item(CalibrateArea),"destino circular perdeu forma na interface ou exigiu medição");
             require(app.item(CalibrateHealth)&&!IsWindowEnabled(app.item(CalibrateHealth)),
                     "área circular ofereceu calibração de barra horizontal");
-            app.saveEditor();require(aa::loadWorkspace(app.workspacePath,{}).huds[1].areas[1].region.shape==aa::RegionShape::Circle,
+            app.commit(app.workspace);require(aa::loadWorkspace(app.workspacePath,{}).huds[1].areas[1].region.shape==aa::RegionShape::Circle,
                 "interface não preservou formato da área");
             screenshot(app,pictures,L"ui-hud-circulo.png");
             app.area()->region.shape=aa::RegionShape::Rectangle;
@@ -348,8 +512,8 @@ int wmain(int argc,wchar_t** argv){
             require(IsWindowEnabled(app.item(CalibrateArea))&&!aa::readinessIssues(app.workspace).empty(),"origem deixou de exigir medição");
             screenshot(app,pictures,L"ui-hud-leitura.png");
             app.area()->iconCalibrated=true;
-            auto other=rule;other.id=L"r-other";other.sourceArea=L"HABILIDADE E";other.targetArea=L"Meus status";other.condition.enabled=false;
-            app.workspace.sets[1].rules.push_back(other);app.makeUI();choose(app,AreaList,1,true);
+            auto other=rule;other.id=L"r-other";other.condition.name=L"Outra leitura";other.sourceArea=L"HABILIDADE E";other.targetArea=L"Meus status";other.condition.enabled=false;
+            app.workspace.rules.push_back(other);app.workspace.sets[1].rules.push_back({other.id,false});app.makeUI();choose(app,AreaList,1,true);
             require(app.item(CalibrateArea)&&shows(app,L"buscar status e receber destaque")&&app.area()->iconSize==57,
                 "uso duplo em outro set perdeu medição salva ou foi ignorado");
             screenshot(app,pictures,L"ui-hud-uso-duplo.png");
@@ -357,7 +521,7 @@ int wmain(int argc,wchar_t** argv){
             require(app.item(CalibrateArea)&&shows(app,L"buscar status e receber destaque"),"uso da HUD depende apenas do set ativo");
             app.saveEditor();const auto saved=aa::loadWorkspace(app.workspacePath,{});
             require(saved.huds[1].areas[1].iconCalibrated&&saved.huds[1].areas[1].iconSize==57&&
-                saved.sets[0].rules[0].targetArea==original.sets[0].rules[0].targetArea,"interface alterou medição ou regra salva");
+                saved.rules[0].targetArea==original.rules[0].targetArea,"interface alterou medição ou regra salva");
             app.area()->readyReferencePath=app.storeImage(L"skill",aa::loadImageResource(IDR_ASSASSIN_NONE));
             app.makeUI();
             require(app.skillPreview.valid()&&IsWindowEnabled(app.item(ConfirmReadySkill))&&!app.area()->readyConfirmed,
@@ -382,21 +546,27 @@ int wmain(int argc,wchar_t** argv){
         tab(app,2);
         require(!app.item(StatusName)&&!app.item(StatusKind)&&!app.item(AddPreset)&&!app.item(CaptureStack)&&!app.item(HudName)&&!app.item(RuleName),"Status repete nome ou exibe opções da regra");
         app.rebuildUIWithDraft();require(!app.item(StatusName)&&app.selectedStatus()->name==L"Espírito Assassino","reconstrução deve preservar o status selecionado sem repetir o nome");
-        tab(app,3);require(app.workspace.statuses[0].name==L"Espírito Assassino"&&app.rule()->statusId==L"s1","status informativo quebrou vínculo");
+        tab(app,4);require(app.workspace.statuses[0].name==L"Espírito Assassino"&&app.rule()->statusId==L"s1","status informativo quebrou vínculo");
         require(!app.item(RuleName)&&app.item(RenameRule)&&!app.item(StatusName)&&!app.item(HudName),"Regras repetem o nome ou misturam outros editores");
         require(app.item(TriggerList)&&app.item(NewTrigger)&&app.item(DeleteTrigger),"regra deve expor condições alternativas por OU");
         auto healthReady=app.workspace;healthReady.huds[0].areas[0].healthCalibration={10,4,180,5,190,42,28};app.commit(healthReady);app.makeUI();
         app.command(NewTrigger,BN_CLICKED);require(app.rule()->triggers.size()==2&&app.selectedTrigger==1,"adicionar condição alternativa não selecionou a nova condição");
         choose(app,TriggerKindBox,1);
         require(app.item(HealthArea)&&app.item(HealthComparisonBox)&&app.item(HealthPercent)&&!app.item(RuleStatus),"gatilho de vida misturou controles de status");
-        choose(app,HealthArea,0);choose(app,HealthComparisonBox,0);SetWindowTextW(app.item(HealthPercent),L"49");app.saveEditor();
+        choose(app,HealthArea,0);choose(app,HealthComparisonBox,0);SetWindowTextW(app.item(HealthPercent),L"49");app.command(HealthPercent,EN_CHANGE);app.saveEditor();
         const auto& healthTrigger=app.rule()->triggers[1];
         require(healthTrigger.kind==aa::TriggerKind::Health&&healthTrigger.healthArea==L"Meus status"&&healthTrigger.healthPercent==49,
                 "editor nao salvou a condicao de vida");
+        SetWindowTextW(app.item(HealthPercent),L"37");app.command(HealthPercent,EN_CHANGE);choose(app,TriggerList,0);
+        require(app.rule()->triggers[1].healthPercent==37&&aa::loadWorkspace(app.workspacePath,{}).rules[0].triggers[1].healthPercent==37,
+                "selecionar outra condição descartou percentual de vida digitado");
+        choose(app,TriggerList,1);SetWindowTextW(app.item(HealthPercent),L"41");app.command(HealthPercent,EN_CHANGE);tab(app,3);tab(app,4);
+        require(app.rule()->triggers[1].healthPercent==41&&aa::loadWorkspace(app.workspacePath,{}).rules[0].triggers[1].healthPercent==41,
+                "trocar de aba descartou percentual de vida digitado");
         screenshot(app,pictures,L"ui-regra-vida.png");
         {
             aa::MonitorReader healthReader;healthReader.kind=aa::MonitorReaderKind::Health;healthReader.area=app.hud()->areas[0];
-            app.plan.readers={healthReader};app.running=true;app.page=3;app.makeUI();
+            app.plan.readers={healthReader};app.running=true;app.page=4;app.makeUI();
             app.current.resize(1);app.current[0].source=app.source;app.current[0].capturedMs=static_cast<std::int64_t>(GetTickCount64());
             app.current[0].healthFraction=.43f;app.refreshStatus();
             require(shows(app,L"Vida · Meus status: 43,0%"),
@@ -419,14 +589,14 @@ int wmain(int argc,wchar_t** argv){
         require(app.item(OnlyWhenReady)&&SendMessageW(app.item(OnlyWhenReady),BM_GETCHECK,0,0)==BST_UNCHECKED,
                 "filtro de cooldown alterou uma regra antiga");
         SendMessageW(app.item(OnlyWhenReady),BM_SETCHECK,BST_CHECKED,0);app.command(OnlyWhenReady,BN_CLICKED);
-        require(app.rule()->onlyWhenReady&&aa::loadWorkspace(app.workspacePath,{}).sets[0].rules[0].onlyWhenReady,
+        require(app.rule()->onlyWhenReady&&aa::loadWorkspace(app.workspacePath,{}).rules[0].onlyWhenReady,
                 "checkbox de cooldown nao persistiu");
         SendMessageW(app.item(OnlyWhenReady),BM_SETCHECK,BST_UNCHECKED,0);app.command(OnlyWhenReady,BN_CLICKED);
         require(!app.rule()->onlyWhenReady,"filtro de cooldown nao voltou ao padrao desligado");
         {
-            SendMessageW(app.item(FollowClock),BM_CLICK,0,0);app.rebuildUIWithDraft();
+            SendMessageW(app.item(FollowClock),BM_CLICK,0,0);app.command(FollowClock,BN_CLICKED);app.rebuildUIWithDraft();
             require(SendMessageW(app.item(FollowClock),BM_GETCHECK,0,0)==BST_CHECKED,"DPI perdeu opcao de relogio");
-            app.saveEditor();require(aa::loadWorkspace(app.workspacePath,{}).sets[0].rules[0].followClock,"interface nao persistiu acompanhamento");
+            app.saveEditor();require(aa::loadWorkspace(app.workspacePath,{}).rules[0].followClock,"interface nao persistiu acompanhamento");
             screenshot(app,pictures,L"ui-regra-relogio.png");
             choose(app,ConditionBox,1);
             require(!IsWindowEnabled(app.item(FollowClock)),"ausencia permitiu mostrar tempo de status ausente");
@@ -435,7 +605,7 @@ int wmain(int argc,wchar_t** argv){
         }
         {
             ShowWindow(app.window,SW_SHOWNOACTIVATE);SetActiveWindow(app.window);
-            const auto checkbox=app.item(Enabled);SetFocus(checkbox);const auto checked=SendMessageW(checkbox,BM_GETCHECK,0,0);
+            const auto checkbox=app.item(OnlyWhenReady);SetFocus(checkbox);const auto checked=SendMessageW(checkbox,BM_GETCHECK,0,0);
             SendMessageW(checkbox,WM_KEYDOWN,VK_SPACE,0);SendMessageW(checkbox,WM_KEYUP,VK_SPACE,0);
             require(SendMessageW(checkbox,BM_GETCHECK,0,0)!=checked,"checkbox com tema não responde ao Espaço");
             SendMessageW(checkbox,WM_KEYDOWN,VK_SPACE,0);SendMessageW(checkbox,WM_KEYUP,VK_SPACE,0);
@@ -444,7 +614,16 @@ int wmain(int argc,wchar_t** argv){
             require(SendMessageW(combo,CB_GETCURSEL,0,0)==1&&!SendMessageW(combo,CB_GETDROPPEDSTATE,0,0),"combo com tema não aceita escolha pelo teclado");
             ShowWindow(app.window,SW_HIDE);
         }
-        for(int effect=0;effect<5;++effect){choose(app,EffectBox,effect);app.saveEditor();require(static_cast<int>(aa::loadWorkspace(app.workspacePath,{}).sets[0].rules[0].effect)==effect,"efeito da interface não persiste");}
+        for(int effect=0;effect<5;++effect){choose(app,EffectBox,effect);app.saveEditor();require(static_cast<int>(aa::loadWorkspace(app.workspacePath,{}).rules[0].effect)==effect,"efeito da interface não persiste");}
+        {
+            const auto previous=app.workspace;
+            auto old=previous;old.rules[0].condition.profile=L"Metadado do perfil antigo";
+            old.rules[0].action.profile=old.rules[0].condition.profile;
+            app.commit(old);app.makeUI();choose(app,EffectBox,1);
+            require(aa::loadWorkspace(app.workspacePath,{}).rules[0].condition.profile==L"Metadado do perfil antigo",
+                    "editar regra compartilhada apagou metadado do workspace antigo");
+            app.commit(previous);app.makeUI();
+        }
         {
             const auto before=app.workspace;
             aa::Image colored{64,64,std::vector<std::uint8_t>(64*64*4,255)};
@@ -452,12 +631,12 @@ int wmain(int argc,wchar_t** argv){
             require(app.applyActionColor(colored),"cor vermelha válida não foi aplicada");
             const auto capturedColor=app.rule()->condition.color;
             require(GetRValue(capturedColor)>GetBValue(capturedColor)&&
-                    aa::loadWorkspace(app.workspacePath,{}).sets[0].rules[0].condition.color==capturedColor,
+                    aa::loadWorkspace(app.workspacePath,{}).rules[0].condition.color==capturedColor,
                     "cor capturada inverteu canais ou não foi salva");
             app.makeUI();app.saveEditor();require(app.rule()->condition.color==capturedColor,"editor substituiu cor capturada pela paleta");
             require(!app.applyActionColor({})&&app.rule()->condition.color==capturedColor,"imagem inválida apagou cor salva");
             std::fill(colored.bgra.begin(),colored.bgra.end(),std::uint8_t{100});
-            require(!app.applyActionColor(colored)&&aa::loadWorkspace(app.workspacePath,{}).sets[0].rules[0].condition.color==capturedColor,
+            require(!app.applyActionColor(colored)&&aa::loadWorkspace(app.workspacePath,{}).rules[0].condition.color==capturedColor,
                     "imagem neutra alterou cor salva");
             app.hud()->areas.push_back({L"Habilidade Q",{410,420,70,50},48,false});app.makeUI();
             choose(app,TargetArea,2);ShowWindow(app.window,SW_SHOWNOACTIVATE);
@@ -479,14 +658,14 @@ int wmain(int argc,wchar_t** argv){
         }
         const auto stacksBeforeChangingStatus=app.rule()->condition.stacks;
         choose(app,RuleStatus,1);require(SendMessageW(app.item(Stacks),CB_GETCOUNT,0,0)==0,"status personalizado herdou contadores do exemplo");
-        tab(app,2);require(app.set()->rules[0].statusId==L"s2"&&app.set()->rules[0].condition.stacks==stacksBeforeChangingStatus,"rascunho sem amostra impediu navegação ou mudou valor");
+        tab(app,2);require(app.workspace.rules[0].statusId==L"s2"&&app.workspace.rules[0].condition.stacks==stacksBeforeChangingStatus,"rascunho sem amostra impediu navegação ou mudou valor");
         require(!aa::readinessIssues(app.workspace).empty(),"regra sem referência ficou pronta");
         choose(app,StatusList,1,true);
         bool blocked=false;try{app.command(DeleteStatus,BN_CLICKED);}catch(const std::invalid_argument&){blocked=true;}require(blocked&&app.workspace.statuses.size()==2,"exclusão removeu status usado");
         app.error.clear();
         auto custom=app.workspace;custom.statuses[1].referencePath=app.storeImage(L"s2",aa::loadImageResource(IDR_ASSASSIN_NONE));
         const auto five=app.storeImage(L"s2",aa::loadImageResource(IDR_ASSASSIN_3));
-        for(auto& profile:custom.sets)for(auto& configured:profile.rules)if(configured.statusId==L"s2")configured.stackSamples={{5,five}};
+        for(auto& configured:custom.rules)if(configured.statusId==L"s2")configured.stackSamples={{5,five}};
         app.commit(custom);app.makeUI();screenshot(app,pictures,L"ui-status.png");
         auto presenceReader=aa::MonitorReader{app.workspace.statuses[1],app.hud()->areas[0],false};
         const auto presenceOnly=makeRecognizer(presenceReader);
@@ -549,7 +728,7 @@ int wmain(int argc,wchar_t** argv){
             multi.statuses={{L"a",L"Carga",false,true,{},{}},{L"b",L"Comida",false,false,app.storeImage(L"food",food),{}}};
             auto first=rule;first.id=L"first";first.statusId=L"a";first.sourceArea=L"Status";first.targetArea=L"A";first.condition.condition=aa::Condition::Present;
             auto second=first;second.id=L"second";second.statusId=L"b";second.targetArea=L"B";second.condition.name=L"Comida presente";
-            multi.sets={{L"set",L"Dois status",{first,second}}};const auto plan=aa::makeMonitorPlan(multi);
+            multi.rules={first,second};multi.sets={{L"set",L"Dois status",{{first.id,true},{second.id,true}}}};const auto plan=aa::makeMonitorPlan(multi);
             const auto a=makeRecognizer(plan.readers[0]),b=makeRecognizer(plan.readers[1]);
             aa::Image roi{160,80,std::vector<std::uint8_t>(160*80*4,24)};
             const auto place=[&](const aa::Image& icon,int left){
@@ -564,21 +743,21 @@ int wmain(int argc,wchar_t** argv){
             for(int y=0;y<80;++y)std::fill_n(roi.bgra.data()+static_cast<std::size_t>(y)*160*4,80*4,std::uint8_t{24});
             observations=observe();require(aa::evaluateMonitor(plan,observations,1000,750,11)==std::vector<bool>({false,true}),"retirar um status interferiu na leitura do outro");
         }
-        tab(app,3);require(SendMessageW(app.item(Stacks),CB_GETCOUNT,0,0)==1&&SendMessageW(app.item(Stacks),CB_GETCURSEL,0,0)==CB_ERR,"amostra nova substituiu valor salvo silenciosamente");
+        tab(app,4);require(SendMessageW(app.item(Stacks),CB_GETCOUNT,0,0)==1&&SendMessageW(app.item(Stacks),CB_GETCURSEL,0,0)==CB_ERR,"amostra nova substituiu valor salvo silenciosamente");
         choose(app,Stacks,0);choose(app,EffectBox,1);app.saveEditor();require(app.rule()->condition.stacks==5&&app.rule()->effect==aa::OverlayEffect::Glow,"regra não salvou contador genérico e brilho");
         choose(app,ConditionBox,0);app.saveEditor();require(app.rule()->condition.condition==aa::Condition::Present&&!IsWindowEnabled(app.item(Stacks)),"presença usa contador");
         choose(app,ConditionBox,1);app.saveEditor();require(app.rule()->condition.condition==aa::Condition::Absent,"ausência mapeada incorretamente");
-        createNamed(app,NewRule,L"Segunda regra");createNamed(app,NewRule,L"Terceira regra");require(app.set()->rules.size()==3&&app.set()->rules[1].condition.name!=app.set()->rules[2].condition.name,"novas regras colidem");
-        app.command(MoveRuleUp,BN_CLICKED);require(app.selectedRule==1,"prioridade não mudou");app.command(DeleteRule,BN_CLICKED);require(app.set()->rules.size()==2,"regra não removida");
+        createNamed(app,NewRule,L"Segunda regra");createNamed(app,NewRule,L"Terceira regra");require(app.workspace.rules.size()==3&&app.workspace.rules[1].condition.name!=app.workspace.rules[2].condition.name,"novas regras colidem");
+        app.command(DeleteRule,BN_CLICKED);require(app.workspace.rules.size()==2,"regra avulsa não foi removida");
 
-        tab(app,1);createNamed(app,NewHud,L"Outra tela");require(app.hud()->areas.empty()&&app.hud()->clientWidth==0&&app.workspace.statuses.size()==2&&app.set()->rules.size()==2,"nova HUD copiou tela ou alterou biblioteca/set");
+        tab(app,1);createNamed(app,NewHud,L"Outra tela");require(app.hud()->areas.empty()&&app.hud()->clientWidth==0&&app.workspace.statuses.size()==2&&app.set()->rules.size()==1,"nova HUD copiou tela ou alterou biblioteca/set");
         const auto created=app.workspace.activeHudId;confirmDeleteHud(app,IDNO);require(app.workspace.activeHudId==created&&app.workspace.huds.size()==3,"cancelamento excluiu HUD");
-        confirmDeleteHud(app,IDYES);require(app.workspace.huds.size()==2&&app.workspace.activeHudId!=created&&app.workspace.statuses.size()==2&&app.set()->rules.size()==2,"excluir HUD alterou biblioteca/set");
+        confirmDeleteHud(app,IDYES);require(app.workspace.huds.size()==2&&app.workspace.activeHudId!=created&&app.workspace.statuses.size()==2&&app.set()->rules.size()==1,"excluir HUD alterou biblioteca/set");
         require(app.item(HudList)!=nullptr,"HUDs restantes precisam continuar acessíveis após excluir a ativa");
-        choose(app,HudList,0);tab(app,3);app.selectedRule=0;app.makeUI();
+        choose(app,HudList,0);tab(app,4);app.selectedRule=0;app.makeUI();
         const auto screen=screenOf(app.target);app.hud()->monitorDpi=screen.dpi;app.hud()->monitorDevice=screen.device;
         app.hud()->areas[1].region.shape=aa::RegionShape::Circle;
-        choose(app,ConditionBox,0);SendMessageW(app.item(FollowClock),BM_SETCHECK,BST_CHECKED,0);
+        choose(app,ConditionBox,0);SendMessageW(app.item(FollowClock),BM_SETCHECK,BST_CHECKED,0);app.command(FollowClock,BN_CLICKED);
         app.current={{{aa::Presence::Present,3,1.0f,{},{}},static_cast<std::int64_t>(GetTickCount64()),app.source}};
         app.latest=app.current;app.pending=true;app.running=true;const auto oldSource=app.source;
         app.testAction();require(!app.running&&app.source>oldSource&&!app.pending&&app.current.empty()&&app.latest.empty(),"teste visual preservou leitura anterior");
@@ -594,9 +773,9 @@ int wmain(int argc,wchar_t** argv){
             TestApp imported;imported.configureStorage(folder/L"legacy"/L"settings.ini");
             aa::Settings legacy;legacy.referencePath=app.workspace.statuses[1].referencePath;legacy.rule.stacks=3;
             aa::saveSettings(imported.settingsPath.wstring(),legacy);imported.load();
-            require(imported.workspace.statuses.size()==1&&!imported.workspace.statuses[0].builtinAssassin&&imported.workspace.statuses[0].stacks.empty()&&imported.workspace.sets[0].rules[0].stackSamples.size()==2,"migração não moveu amostras para regra");
-            imported.load();require(imported.workspace.sets[0].rules[0].stackSamples.size()==2,"migração repetida duplicou amostras da regra");
+            require(imported.workspace.statuses.size()==1&&!imported.workspace.statuses[0].builtinAssassin&&imported.workspace.statuses[0].stacks.empty()&&imported.workspace.rules[0].stackSamples.size()==2,"migração não moveu amostras para regra");
+            imported.load();require(imported.workspace.rules[0].stackSamples.size()==2,"migração repetida duplicou amostras da regra");
         }
-        std::cout<<"Fluxos de quatro páginas, CRUD, cancelamento, persistência, contadores genéricos, DPI e teste temporário aprovados; sem teste em jogo.\n";return 0;
+        std::cout<<"Fluxos de cinco abas, biblioteca compartilhada, CRUD, persistência, contadores, DPI e teste temporário aprovados; sem teste em jogo.\n";return 0;
     }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }
