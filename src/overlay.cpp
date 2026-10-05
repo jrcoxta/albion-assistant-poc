@@ -1,4 +1,5 @@
 #include "overlay.h"
+#include "diagnostic_log.h"
 
 #include <algorithm>
 #include <cmath>
@@ -46,6 +47,14 @@ LRESULT CALLBACK overlayProc(HWND window, UINT message, WPARAM w, LPARAM l) {
     if (message == WM_ERASEBKGND) return 1;
     return DefWindowProcW(window, message, w, l);
 }
+
+void applyCapturePolicy(HWND window, DWORD mode, const char* stage, const char* explanation,
+                        BOOL (WINAPI *apply)(HWND, DWORD) = SetWindowDisplayAffinity) {
+    if (apply(window, mode)) return;
+    const auto reason = GetLastError(); // Antes de escrever o log ou destruir a janela.
+    diagnostic_log::win32(stage, reason);
+    throw std::runtime_error(std::string(explanation) + " (Win32 " + std::to_string(reason) + ").");
+}
 }
 
 Overlay::~Overlay() {
@@ -61,23 +70,30 @@ void Overlay::initialize(HINSTANCE instance) {
     cls.hInstance = instance;
     cls.lpfnWndProc = overlayProc;
     cls.lpszClassName = L"AlbionAssistantPocOverlay";
-    if (!RegisterClassW(&cls) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
-        throw std::runtime_error("RegisterClass overlay");
+    if (!RegisterClassW(&cls)) {
+        const auto reason=GetLastError();
+        if(reason!=ERROR_CLASS_ALREADY_EXISTS){diagnostic_log::win32("overlay.RegisterClassW",reason);throw std::runtime_error("RegisterClass overlay (Win32 "+std::to_string(reason)+").");}
+    }
     window_ = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE |
         WS_EX_TOOLWINDOW | WS_EX_TOPMOST, cls.lpszClassName, L"Albion Assistant Overlay",
         WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, instance, nullptr);
-    if (!window_) throw std::runtime_error("CreateWindow overlay");
+    if (!window_){const auto reason=GetLastError();diagnostic_log::win32("overlay.CreateWindowExW",reason);throw std::runtime_error("CreateWindow overlay (Win32 "+std::to_string(reason)+").");}
     // Não permitir falha silenciosa na política de captura selecionada.
-    if (!SetWindowDisplayAffinity(window_, captureVisible_ ? WDA_NONE : WDA_EXCLUDEFROMCAPTURE)) {
+    try {
+        applyCapturePolicy(window_, captureVisible_ ? WDA_NONE : WDA_EXCLUDEFROMCAPTURE,
+            "overlay.apply_capture_policy", "SetWindowDisplayAffinity overlay: nao foi possivel aplicar a politica de captura");
+    } catch (...) {
         DestroyWindow(window_);
         window_ = nullptr;
-        throw std::runtime_error("SetWindowDisplayAffinity overlay: nao foi possivel aplicar a politica de captura");
+        throw;
     }
     memoryDC_ = CreateCompatibleDC(nullptr);
     if (!memoryDC_) {
+        const auto reason=GetLastError();
+        diagnostic_log::win32("overlay.CreateCompatibleDC",reason);
         DestroyWindow(window_);
         window_ = nullptr;
-        throw std::runtime_error("CreateCompatibleDC overlay");
+        throw std::runtime_error("CreateCompatibleDC overlay (Win32 "+std::to_string(reason)+").");
     }
 }
 
@@ -85,8 +101,9 @@ void Overlay::setCaptureVisible(bool enabled) {
     // Apenas diagnóstico de screenshot do overlay do próprio app;
     // não altera o jogo nem máscaras de captura de outras janelas.
     if (captureVisible_ == enabled) return;
-    if (window_ && !SetWindowDisplayAffinity(window_, enabled ? WDA_NONE : WDA_EXCLUDEFROMCAPTURE))
-        throw std::runtime_error("SetWindowDisplayAffinity overlay: nao foi possivel alterar a visibilidade na captura");
+    if (window_)
+        applyCapturePolicy(window_, enabled ? WDA_NONE : WDA_EXCLUDEFROMCAPTURE,
+            "overlay.change_capture_policy", "SetWindowDisplayAffinity overlay: nao foi possivel alterar a visibilidade na captura");
     captureVisible_ = enabled;
 }
 

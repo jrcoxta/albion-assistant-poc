@@ -1,9 +1,11 @@
 // Exercita somente janelas e arquivos do próprio teste; não interage com o jogo.
 #include "app.h"
 #include "theme.h"
+#include "diagnostic_log.h"
 #include <objbase.h>
 #include "../resources/resource.h"
 #include <algorithm>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <thread>
@@ -94,6 +96,7 @@ int wmain(int argc,wchar_t** argv){
         TestApp app;app.instance=GetModuleHandleW(nullptr);
         const auto folder=std::filesystem::temp_directory_path()/(L"albion-app-flow-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64()));
         app.configureStorage(folder/L"personalizado.ini");
+        diagnostic_log::configure(folder);
         require(app.workspacePath==folder/L"personalizado-workspace.ini"&&app.directory==folder,"dados de teste não isolados");
         aa::Workspace w;w.nextId=100;
         aa::HudLayout notebook;notebook.id=L"h1";notebook.name=L"Notebook";notebook.clientWidth=800;notebook.clientHeight=600;
@@ -106,6 +109,24 @@ int wmain(int argc,wchar_t** argv){
         rule.stackSamples={{3,app.storeImage(L"r1",aa::loadImageResource(IDR_ASSASSIN_3))}};
         w.rules={rule};w.sets={{L"set1",L"Adagas",{{L"r1",true}}},{L"set2",L"Cajado",{}}};w.activeSetId=L"set1";
         app.commit(w);app.selectedStatusId=L"s1";
+        {
+            const auto obstruction=folder/L"blocked";
+            {std::ofstream file(obstruction);file<<"arquivo, nao pasta";}
+            TestApp inaccessible;
+            bool refused=false;
+            try{inaccessible.configureStorage(obstruction/L"settings.ini");}
+            catch(const std::filesystem::filesystem_error& error){refused=error.code().value()!=0;}
+            require(refused,"pasta de dados obstruída não produziu erro de filesystem");
+            refused=false;
+            try{aa::saveWorkspace(obstruction/L"workspace.ini",w);}
+            catch(const std::filesystem::filesystem_error& error){refused=error.code().value()!=0;}
+            require(refused,"pasta de workspace obstruída não produziu erro de filesystem");
+            std::ifstream log(folder/L"logs"/L"assistant.log");
+            const std::string events(std::istreambuf_iterator<char>{log},std::istreambuf_iterator<char>{});
+            require(events.find("storage.create_directories fs=")!=std::string::npos&&
+                    events.find("workspace.create_directories fs=")!=std::string::npos,
+                    "falha de pasta não guardou etapa e código no log");
+        }
         WNDCLASSW cls{};cls.hInstance=app.instance;cls.lpfnWndProc=testProc;cls.lpszClassName=L"AlbionAppFlowTests";cls.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_BTNFACE+1);RegisterClassW(&cls);
         app.window=CreateWindowExW(0,cls.lpszClassName,L"Validação do painel",WS_OVERLAPPED|WS_CAPTION,20,20,880,740,nullptr,nullptr,app.instance,&app);
         app.target=CreateWindowExW(0,L"STATIC",L"Alvo do teste",WS_POPUP,0,0,800,600,nullptr,nullptr,app.instance,nullptr);
@@ -244,13 +265,20 @@ int wmain(int argc,wchar_t** argv){
                                            nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
             require(locked!=INVALID_HANDLE_VALUE,"teste nao bloqueou a substituicao do workspace temporario");
             SendMessageW(app.item(ShareOverlay),BM_SETCHECK,saved?BST_UNCHECKED:BST_CHECKED,0);
-            bool failed=false;
-            try{app.command(ShareOverlay,BN_CLICKED);}catch(const std::exception&){failed=true;}
+            bool failed=false;unsigned long native=0;
+            try{app.command(ShareOverlay,BN_CLICKED);}catch(const std::exception& error){
+                failed=true;const auto message=std::string(error.what());const auto at=message.find("(Win32 ");
+                if(at!=std::string::npos)native=std::stoul(message.substr(at+7));
+            }
             CloseHandle(locked);
             require(failed&&app.workspace.shareOverlayInCapture==saved&&app.showOverlayInCapture==effective&&
                     aa::loadWorkspace(app.workspacePath,{}).shareOverlayInCapture==saved&&
                     SendMessageW(app.item(ShareOverlay),BM_GETCHECK,0,0)==(effective?BST_CHECKED:BST_UNCHECKED),
-                    "falha ao gravar workspace deixou checkbox e modo efetivo divergentes");
+                     "falha ao gravar workspace deixou checkbox e modo efetivo divergentes");
+            std::ifstream log(folder/L"logs"/L"assistant.log");
+            const std::string recorded(std::istreambuf_iterator<char>{log},std::istreambuf_iterator<char>{});
+            require(native!=0&&recorded.find("workspace.MoveFileExW win32="+std::to_string(native))!=std::string::npos,
+                    "falha nativa ao salvar workspace não deixou código Win32 no log isolado");
         }
         {
             const auto original=app.workspace;

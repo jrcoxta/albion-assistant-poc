@@ -3,6 +3,7 @@
 #endif
 #include <windows.h>
 #include "workspace.h"
+#include "diagnostic_log.h"
 #include "profiles.h"
 #include <algorithm>
 #include <fstream>
@@ -13,6 +14,11 @@
 
 namespace aa {
 namespace {
+[[noreturn]] void storageFailure(const char* stage, const char* message) {
+    const auto reason=GetLastError();
+    diagnostic_log::win32(stage,reason);
+    throw std::runtime_error(std::string(message)+" (Win32 "+std::to_string(reason)+").");
+}
 constexpr std::size_t entityLimit = 64, childLimit = 32, nameLimit = 251, textLimit = 32000;
 constexpr std::uintmax_t fileLimit = 32 * 1024 * 1024;
 struct CaseLess {
@@ -509,18 +515,23 @@ Workspace loadWorkspace(const std::filesystem::path& file, const std::filesystem
 void saveWorkspace(const std::filesystem::path& file, const Workspace& w) {
     require(!file.empty(), "Caminho de workspace vazio."); validate(w);
     const auto full = std::filesystem::absolute(file);
-    std::filesystem::create_directories(full.parent_path());
+    try{std::filesystem::create_directories(full.parent_path());}
+    catch(const std::filesystem::filesystem_error& error){
+        diagnostic_log::filesystem("workspace.create_directories",error.code().value());throw;
+    }
     const auto temporary = full.wstring() + L".tmp-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64());
     const auto handle = CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (handle == INVALID_HANDLE_VALUE) throw std::runtime_error("Nao foi possivel criar o workspace temporario.");
+    if (handle == INVALID_HANDLE_VALUE) storageFailure("workspace.CreateFileW", "Nao foi possivel criar o workspace temporario");
     const unsigned char bom[] = {0xFF, 0xFE}; DWORD written = 0;
-    const bool created = WriteFile(handle, bom, sizeof(bom), &written, nullptr) && written == sizeof(bom);
+    const bool wrote = WriteFile(handle, bom, sizeof(bom), &written, nullptr) != FALSE;
+    const auto writeError=wrote?ERROR_WRITE_FAULT:GetLastError();
+    const bool created=wrote&&written==sizeof(bom);
     CloseHandle(handle);
     try {
-        if (!created) throw std::runtime_error("Nao foi possivel iniciar o workspace Unicode.");
+        if (!created){SetLastError(writeError);storageFailure("workspace.WriteFile", "Nao foi possivel iniciar o workspace Unicode");}
         const auto write = [&](const std::wstring& section, const wchar_t* key, const std::wstring& value) {
             if (!WritePrivateProfileStringW(section.c_str(), key, value.c_str(), temporary.c_str()))
-                throw std::runtime_error("Nao foi possivel gravar o workspace.");
+                storageFailure("workspace.WritePrivateProfileStringW", "Nao foi possivel gravar o workspace");
         };
         const auto text = [&](const std::wstring& section, const wchar_t* key, const std::wstring& value) { write(section, key, L"\"" + value + L"\""); };
         const auto number = [&](const std::wstring& section, const wchar_t* key, auto value) { write(section, key, std::to_wstring(value)); };
@@ -592,9 +603,10 @@ void saveWorkspace(const std::filesystem::path& file, const Workspace& w) {
         WritePrivateProfileStringW(nullptr, nullptr, nullptr, temporary.c_str());
         (void)readWorkspace(temporary);
         const auto flush = CreateFileW(temporary.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (flush == INVALID_HANDLE_VALUE) throw std::runtime_error("Nao foi possivel verificar a gravacao do workspace.");
-        const bool flushed = FlushFileBuffers(flush) != FALSE; CloseHandle(flush);
-        if (!flushed) throw std::runtime_error("Nao foi possivel concluir a gravacao do workspace.");
+        if (flush == INVALID_HANDLE_VALUE) storageFailure("workspace.CreateFileW", "Nao foi possivel verificar a gravacao do workspace");
+        const bool flushed = FlushFileBuffers(flush) != FALSE;
+        const auto flushError=flushed?ERROR_SUCCESS:GetLastError();CloseHandle(flush);
+        if (!flushed){SetLastError(flushError);storageFailure("workspace.FlushFileBuffers", "Nao foi possivel concluir a gravacao do workspace");}
         // O EXE anterior nao abre o schema 6. Antes da primeira conversao, guardar
         // os bytes originais para permitir voltar ao EXE anterior sem refazer HUDs.
         if (std::filesystem::exists(full)) {
@@ -610,20 +622,20 @@ void saveWorkspace(const std::filesystem::path& file, const Workspace& w) {
                     if(!CopyFileW(full.c_str(),backup.c_str(),TRUE)) {
                         const auto reason=GetLastError();
                         if((reason==ERROR_FILE_EXISTS||reason==ERROR_ALREADY_EXISTS)&&suffix<9999)continue;
-                        throw std::runtime_error("Nao foi possivel guardar uma copia do workspace antigo; o original foi mantido.");
+                        SetLastError(reason);storageFailure("workspace.CopyFileW", "Nao foi possivel guardar uma copia do workspace antigo; o original foi mantido");
                     }
                     // A copia so habilita a substituicao depois de ser legivel e duravel.
                     (void)readWorkspace(backup);
                     const auto stored=CreateFileW(backup.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
-                    if(stored==INVALID_HANDLE_VALUE)throw std::runtime_error("Nao foi possivel verificar a copia do workspace antigo.");
-                    const bool safe=FlushFileBuffers(stored)!=FALSE;CloseHandle(stored);
-                    if(!safe)throw std::runtime_error("Nao foi possivel concluir a copia do workspace antigo.");
+                    if(stored==INVALID_HANDLE_VALUE)storageFailure("workspace.CreateFileW", "Nao foi possivel verificar a copia do workspace antigo");
+                    const bool safe=FlushFileBuffers(stored)!=FALSE;const auto safeError=safe?ERROR_SUCCESS:GetLastError();CloseHandle(stored);
+                    if(!safe){SetLastError(safeError);storageFailure("workspace.FlushFileBuffers", "Nao foi possivel concluir a copia do workspace antigo");}
                     break;
                 }
             }
         }
         if (!MoveFileExW(temporary.c_str(), full.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-            throw std::runtime_error("Nao foi possivel substituir o workspace.");
+            storageFailure("workspace.MoveFileExW", "Nao foi possivel substituir o workspace");
         WritePrivateProfileStringW(nullptr, nullptr, nullptr, full.c_str());
     } catch (...) { DeleteFileW(temporary.c_str()); throw; }
 }
