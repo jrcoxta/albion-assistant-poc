@@ -1,14 +1,20 @@
 #include "overlay_effect.h"
+#include "diagnostic_log.h"
 #include "../src/overlay.cpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <functional>
+#include <fstream>
 #include <iostream>
 #include <numbers>
 #include <objbase.h>
 
 namespace {
+BOOL WINAPI deniedAffinity(HWND, DWORD) {
+    SetLastError(ERROR_ACCESS_DENIED);
+    return FALSE;
+}
 void check(bool value, const char* message) {
     if (!value) throw std::runtime_error(message);
 }
@@ -286,6 +292,9 @@ void colorChecks() {
     check(!aa::skillAccentColor(neutral), "Ruído isolado deu cor a ícone neutro");
 }
 void visibilityChecks() {
+    const auto logs=std::filesystem::temp_directory_path() /
+        (L"albion-overlay-error-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64()));
+    diagnostic_log::configure(logs);
     Overlay overlay;
     overlay.initialize(GetModuleHandleW(nullptr));
     overlay.setRemaining(0.75f);
@@ -300,6 +309,22 @@ void visibilityChecks() {
         return TRUE;
     }, reinterpret_cast<LPARAM>(&window));
     check(window != nullptr, "Janela de overlay não foi criada");
+    bool reported = false;
+    try {
+        applyCapturePolicy(window, WDA_EXCLUDEFROMCAPTURE, "overlay.apply_capture_policy",
+            "Falha de captura", deniedAffinity);
+    } catch (const std::runtime_error& error) {
+        reported = std::string(error.what()).find("Win32 5") != std::string::npos;
+    }
+    check(reported, "Falha Win32 de afinidade não preservou código para suporte");
+    {
+        std::ifstream stream(logs/L"logs"/L"assistant.log");
+        const std::string contents(std::istreambuf_iterator<char>{stream}, std::istreambuf_iterator<char>{});
+        check(contents.find("overlay.apply_capture_policy win32=5")!=std::string::npos,
+            "Falha de afinidade não apareceu no arquivo de diagnóstico");
+    }
+    diagnostic_log::configure({});
+    std::filesystem::remove_all(logs);
     const auto styles = GetWindowLongPtrW(window, GWL_EXSTYLE);
     constexpr LONG_PTR required = WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
     check((styles & required) == required, "Overlay perdeu estilos de passagem de clique e foco");

@@ -72,6 +72,7 @@ struct App {
     std::atomic<bool> pending=false;
     aa::Image latestImage;
     std::wstring latestError;
+    std::wstring lastLoggedCaptureError;
     std::uint64_t source=0, latestSource=0, previewUntil=0;
     bool previewClock=false;
     aa::Region previewTarget;

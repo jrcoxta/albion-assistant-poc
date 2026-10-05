@@ -1,4 +1,5 @@
 #include "app.h"
+#include "diagnostic_log.h"
 #include "calibration.h"
 #include "theme.h"
 #include "skill_reader.h"
@@ -116,7 +117,11 @@ void App::configureStorage(const std::filesystem::path& settingsFile){
         if(FAILED(SHGetFolderPathW(nullptr,CSIDL_LOCAL_APPDATA,nullptr,SHGFP_TYPE_CURRENT,folder)))throw std::runtime_error("Pasta de dados indisponível.");
         settingsPath=std::filesystem::path(folder)/L"AlbionAssistant"/L"settings.ini";
     }else settingsPath=std::filesystem::absolute(settingsFile);
-    directory=settingsPath.parent_path();std::filesystem::create_directories(directory);
+    directory=settingsPath.parent_path();
+    try{std::filesystem::create_directories(directory);}
+    catch(const std::filesystem::filesystem_error& error){
+        diagnostic_log::filesystem("storage.create_directories",error.code().value());throw;
+    }
     workspacePath=directory/(settingsPath.filename()==L"settings.ini"?L"workspace.ini":settingsPath.stem().wstring()+L"-workspace.ini");
 }
 void App::load(){
@@ -151,15 +156,19 @@ bool App::connect(){
     EnumWindows([](HWND candidate,LPARAM data)->BOOL{
         wchar_t title[256]{};GetWindowTextW(candidate,title,256);if(std::wstring(title)!=L"Albion Online Client")return TRUE;
         DWORD pid=0;GetWindowThreadProcessId(candidate,&pid);HANDLE process=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid);
-        if(!process)return TRUE;wchar_t path[1024]{};DWORD length=1024;
-        const BOOL ok=QueryFullProcessImageNameW(process,0,path,&length);CloseHandle(process);
+        if(!process){diagnostic_log::win32("connect.OpenProcess",GetLastError());return TRUE;}
+        wchar_t path[1024]{};DWORD length=1024;
+        const BOOL ok=QueryFullProcessImageNameW(process,0,path,&length);
+        if(!ok)diagnostic_log::win32("connect.QueryFullProcessImageNameW",GetLastError());
+        CloseHandle(process);
         if(ok&&_wcsicmp(std::filesystem::path(path).filename().c_str(),L"Albion-Online.exe")==0){*reinterpret_cast<HWND*>(data)=candidate;return FALSE;}return TRUE;
     },reinterpret_cast<LPARAM>(&found));
-    if(!found){error=L"Abra o Albion Online em janela ou janela sem bordas antes de conectar.";refreshStatus();return false;}
+    if(!found){diagnostic_log::event("connect.target_unavailable");error=L"Abra o Albion Online em janela ou janela sem bordas antes de conectar.";refreshStatus();return false;}
     stop();target=found;if(IsIconic(target))ShowWindow(target,SW_RESTORE);
     error=geometryMatches()?L"Jogo conectado. HUD compatível com esta tela.":L"Jogo conectado. Escolha ou configure uma HUD para esta tela.";refreshStatus();return true;
 }
 void App::stop(){
+    if(running||previewUntil)diagnostic_log::event("session.stopped");
     capture.stop();running=false;previewUntil=0;++source;
     idleIssuesDirty=true;
     if(badge)ShowWindow(badge,SW_HIDE);
@@ -167,8 +176,10 @@ void App::stop(){
     if(testOverlay)testOverlay->update(target,{},false);
     recognizers.clear();readyReferences.clear();current.clear();currentReady.clear();lastReadings.clear();clocks.clear();clockPredictions.clear();lit.assign(plan.actions.size(),false);
     {std::lock_guard lock(mutex);latest.clear();latestReady.clear();latestSource=0;latestImage={};latestError.clear();pending=false;}
+    lastLoggedCaptureError.clear();
 }
 void App::start(){
+    diagnostic_log::event("session.start_requested");
     if(selecting)return;
     capturePreview={};InvalidateRect(window,nullptr,FALSE);
     saveEditor();stop();
@@ -183,6 +194,7 @@ void App::start(){
         }
     }catch(const std::exception&){issues.insert(issues.begin(),L"Janela do jogo indisponível ou fora dos monitores. Conecte novamente.");}
     if(!issues.empty()){
+        diagnostic_log::detail("session.readiness_blocked",static_cast<unsigned>(issues.size()));
         error=L"Antes de iniciar:\r\n";for(std::size_t i=0;i<std::min<std::size_t>(issues.size(),4);++i)error+=L"• "+issues[i]+L"\r\n";
         page=4;makeUI();return;
     }
@@ -211,6 +223,7 @@ void App::start(){
         readyReferences.push_back(std::move(reference));
     }
     current.resize(plan.readers.size());lit.assign(plan.actions.size(),false);running=true;const auto runSource=++source;
+    diagnostic_log::event("session.capture_starting");
     error.clear();page=4;makeUI();SetForegroundWindow(target);
     try{
         const auto readySources=aa::readyComparisonSources(plan);
@@ -239,6 +252,10 @@ void App::start(){
 }
 void App::consume(){
     {std::lock_guard lock(mutex);pending=false;if(!running||latestSource!=source)return;current=latest;currentReady=latestReady;if(latestImage.valid())capturePreview=std::move(latestImage);error=latestError;}
+    if(error!=lastLoggedCaptureError){
+        diagnostic_log::event(error.empty()?"capture.recovered":"capture.unavailable");
+        lastLoggedCaptureError=error;
+    }
     // Histórico somente informativo: evaluateMonitor continua recebendo current.
     if(!current.empty()&&std::all_of(current.begin(),current.end(),[this](const auto& observation){
         return observation.source==source&&observation.capturedMs>0;

@@ -1,4 +1,5 @@
 #include "capture.h"
+#include "diagnostic_log.h"
 
 #include <d3d11.h>
 #include <dxgi1_2.h>
@@ -29,6 +30,13 @@ struct RecalibrationError : std::runtime_error {
 
 void check(HRESULT result, const char* operation) {
     if (FAILED(result)) {
+        char stage[96] = "capture.";
+        std::size_t i = sizeof("capture.") - 1;
+        for (const char* source = operation; *source && i + 1 < sizeof(stage); ++source)
+            stage[i++] = ((*source >= 'a' && *source <= 'z') || (*source >= 'A' && *source <= 'Z') ||
+                          (*source >= '0' && *source <= '9') || *source == '_') ? *source : '_';
+        stage[i] = '\0';
+        diagnostic_log::hresult(stage, result);
         char code[16]{};
         std::snprintf(code, sizeof(code), "0x%08lX", static_cast<unsigned long>(result));
         throw ApiError(std::string("Falha em ") + operation + " (" + code + ").");
@@ -37,6 +45,13 @@ void check(HRESULT result, const char* operation) {
 
 [[noreturn]] void win32Error(const char* operation) {
     const DWORD code = GetLastError();
+    char stage[96] = "capture.";
+    std::size_t i = sizeof("capture.") - 1;
+    for (const char* source = operation; *source && i + 1 < sizeof(stage); ++source)
+        stage[i++] = ((*source >= 'a' && *source <= 'z') || (*source >= 'A' && *source <= 'Z') ||
+                      (*source >= '0' && *source <= '9') || *source == '_') ? *source : '_';
+    stage[i] = '\0';
+    diagnostic_log::win32(stage, code);
     throw std::runtime_error(std::string("Falha em ") + operation +
                              " (Win32 " + std::to_string(code) + ").");
 }
